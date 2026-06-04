@@ -1,8 +1,6 @@
 # 🔐 CipherNote Vault
 
-**CipherNote Vault** is a local encrypted password manager and secure notes app built with Python and PyQt6. It is designed for people who want an offline vault for passwords and important daily notes without depending on a cloud service.
-
-GitHub: <https://github.com/wangyifan349/>
+**CipherNote Vault** is a local encrypted password manager and secure notes app built with Python and PyQt6. It is designed for people who want an offline vault for passwords and important daily notes without depending on a cloud service. Project author: **Wang Yifan**. GitHub: <https://github.com/wangyifan349/>.
 
 ## ✨ What it does
 
@@ -59,30 +57,22 @@ This is not a perfect anti-capture guarantee. It cannot stop phone photography, 
 
 The app-defined QSS colors are designed with a zero blue channel, using red/yellow/black-style `#RRGG00` colors. Emoji icons were removed from the app UI to avoid colored system emoji glyphs introducing blue pixels. Native OS title bars, file dialogs, and message-box frames may still be drawn by the OS theme.
 
-## 📥▶️ Clone the repository
-### Linux / macOS
-
-```bash
-git clone https://github.com/wangyifan349/CipherNoteVault.git
-cd CipherNoteVault
-python3 -m pip install --upgrade pip
-python3 -m pip install PyQt6 "cryptography>=44.0.0"
-python3 CipherNoteVault_en.py
-
-
-### Windows
-git clone https://github.com/wangyifan349/CipherNoteVault.git
-cd CipherNoteVault
-py -3 -m pip install --upgrade pip
-py -3 -m pip install PyQt6 "cryptography>=44.0.0"
-py -3 CipherNoteVault_en.py
-
 ## 🚀 Installation
 
 Install dependencies with one command:
 
 ```bash
-python3 -m pip install PyQt6 "cryptography>=44.0.0"
+pip install PyQt6 "cryptography>=44.0.0"
+```
+
+## ▶️ Run
+
+```bash
+python app_en.py
+python app_zh.py
+python app_ja.py
+python app_ko.py
+python app_es.py
 ```
 
 ## 📦 Deployment
@@ -90,9 +80,10 @@ python3 -m pip install PyQt6 "cryptography>=44.0.0"
 For a standalone executable, package the language file you want with PyInstaller:
 
 ```bash
-py -3 -m pip install pyinstaller
-py -3 -m PyInstaller --onefile --windowed CipherNoteVault_en.py
+pyinstaller --onefile --windowed app_en.py
 ```
+
+Replace `app_en.py` with `app_zh.py`, `app_ja.py`, `app_ko.py`, or `app_es.py` as needed. Test the generated executable on the target OS.
 
 ## 🗃️ Database files
 
@@ -106,7 +97,7 @@ You can choose any path from the startup window. If the master password is forgo
 
 ## ⚠️ Security boundary
 
-CipherNote Vault protects data at rest and reduces some ordinary screen-capture risks on Windows. It cannot defend against a compromised operating system, malware already running on the machine, phone photography, privileged capture tools, keyloggers, clipboard monitors, or memory-dump attacks. Use a strong unique master password and consider full-disk encryption such as BitLocker, FileVault, or LUKS.
+CipherNote Vault protects data at rest and reduces some ordinary screen-capture risks on Windows. It cannot defend against a compromised OS, malware already running on the machine, phone photography, privileged capture tools, keyloggers, clipboard monitors, or memory-dump attacks. Use a strong unique master password and consider full-disk encryption such as BitLocker, FileVault, or LUKS.
 
 ## ❤️ Sponsorship
 
@@ -132,8 +123,10 @@ BNB Smart Chain:
 
 ## 📄 License
 
-CipherNote Vault is released under the **GNU General Public License v3.0 only**. 
+CipherNote Vault is released under the **GNU General Public License v3.0 only**. Source files include:
 
 ```text
 SPDX-License-Identifier: GPL-3.0-only
 ```
+
+For GitHub, choose GNU GPLv3 or add the official GPLv3 text as `LICENSE`.
