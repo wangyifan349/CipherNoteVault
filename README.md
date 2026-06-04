@@ -59,12 +59,23 @@ This is not a perfect anti-capture guarantee. It cannot stop phone photography, 
 
 The app-defined QSS colors are designed with a zero blue channel, using red/yellow/black-style `#RRGG00` colors. Emoji icons were removed from the app UI to avoid colored system emoji glyphs introducing blue pixels. Native OS title bars, file dialogs, and message-box frames may still be drawn by the OS theme.
 
-## 📥 Clone the repository
+## 📥▶️ Clone the repository
+### Linux / macOS
 
 ```bash
 git clone https://github.com/wangyifan349/CipherNoteVault.git
 cd CipherNoteVault
-```
+python3 -m pip install --upgrade pip
+python3 -m pip install PyQt6 "cryptography>=44.0.0"
+python3 CipherNoteVault_en.py
+
+
+### Windows
+git clone https://github.com/wangyifan349/CipherNoteVault.git
+cd CipherNoteVault
+py -3 -m pip install --upgrade pip
+py -3 -m pip install PyQt6 "cryptography>=44.0.0"
+py -3 CipherNoteVault_en.py
 
 ## 🚀 Installation
 
@@ -74,48 +85,14 @@ Install dependencies with one command:
 python3 -m pip install PyQt6 "cryptography>=44.0.0"
 ```
 
-## ▶️ Run
-
-Run the English UI:
-
-```bash
-python3 app_en.py
-```
-
-Run the Chinese UI:
-
-```bash
-python3 app_zh.py
-```
-
-Run the Japanese UI:
-
-```bash
-python3 app_ja.py
-```
-
-Run the Korean UI:
-
-```bash
-python3 app_ko.py
-```
-
-Run the Spanish UI:
-
-```bash
-python3 app_es.py
-```
-
 ## 📦 Deployment
 
 For a standalone executable, package the language file you want with PyInstaller:
 
 ```bash
-python3 -m pip install pyinstaller
-pyinstaller --onefile --windowed app_en.py
+py -3 -m pip install pyinstaller
+py -3 -m PyInstaller --onefile --windowed CipherNoteVault_en.py
 ```
-
-Replace `app_en.py` with `app_zh.py`, `app_ja.py`, `app_ko.py`, or `app_es.py` as needed. Test the generated executable on the target operating system before distribution.
 
 ## 🗃️ Database files
 
@@ -155,10 +132,8 @@ BNB Smart Chain:
 
 ## 📄 License
 
-CipherNote Vault is released under the **GNU General Public License v3.0 only**. Source files include:
+CipherNote Vault is released under the **GNU General Public License v3.0 only**. 
 
 ```text
 SPDX-License-Identifier: GPL-3.0-only
 ```
-
-For GitHub, choose GNU GPLv3 or add the official GPLv3 text as `LICENSE`.
