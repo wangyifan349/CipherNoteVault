@@ -1,6 +1,7 @@
 # 🔐 CipherNote Vault
 
-**CipherNote Vault** is a local encrypted password manager and secure notes app built with Python and PyQt6. It is designed for people who want an offline vault for passwords and important daily notes without depending on a cloud service. Project author: **Wang Yifan**. GitHub: <https://github.com/wangyifan349/>.
+**CipherNote Vault** is a local encrypted password manager and secure notes app built with Python and PyQt6. It is designed for people who want an offline vault for passwords and important daily notes without depending on a cloud service. 
+
 
 ## ✨ What it does
 
@@ -11,11 +12,11 @@ CipherNote Vault combines a focused password manager with a practical secure not
 This release includes five UI entry points:
 
 ```text
-app_en.py  English
-app_zh.py  Chinese
-app_ja.py  Japanese
-app_ko.py  Korean
-app_es.py  Spanish
+CipherNoteVault_en.py  English
+CipherNoteVault_zh.py  Chinese
+CipherNoteVault_ja.py  Japanese
+CipherNoteVault_ko.py  Korean
+CipherNoteVault_es.py  Spanish
 ```
 
 All language versions use the same `.cnvault` database format and the same cryptographic design.
@@ -68,11 +69,11 @@ pip install PyQt6 "cryptography>=44.0.0"
 ## ▶️ Run
 
 ```bash
-python app_en.py
-python app_zh.py
-python app_ja.py
-python app_ko.py
-python app_es.py
+python CipherNoteVault_en.py
+python CipherNoteVault_zh.py
+python CipherNoteVault_ja.py
+python CipherNoteVault_ko.py
+python CipherNoteVault_es.py
 ```
 
 ## 📦 Deployment
@@ -80,10 +81,11 @@ python app_es.py
 For a standalone executable, package the language file you want with PyInstaller:
 
 ```bash
-pyinstaller --onefile --windowed app_en.py
+pyinstaller --onefile --windowed CipherNoteVault_en.py
+pyinstaller --onefile --windowed CipherNoteVault_es.py
 ```
 
-Replace `app_en.py` with `app_zh.py`, `app_ja.py`, `app_ko.py`, or `app_es.py` as needed. Test the generated executable on the target OS.
+
 
 ## 🗃️ Database files
 
@@ -101,32 +103,70 @@ CipherNote Vault protects data at rest and reduces some ordinary screen-capture 
 
 ## ❤️ Sponsorship
 
-If CipherNote Vault is useful to you, donations are welcome.
+If CipherNote Vault is useful to you, sponsorship is welcome and greatly appreciated.
 
-Bitcoin:
+Your support helps encourage continued development, maintenance, and improvement of the project.
+
+### ₿ Bitcoin
 
 ```text
 bc1qxqfhumpqtnxrznkx9r4xsp8m6zsedtgusjns7p
 ```
 
-Ethereum:
+### Ξ Ethereum
 
 ```text
 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
 ```
-
-BNB Smart Chain:
-
+### ◈ BNB Smart Chain (BEP20)
 ```text
 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
 ```
+❤️ Thank you for supporting open-source software.
+
+
+## 💾 Backup Recommendations
+
+CipherNote Vault stores all passwords and notes inside an encrypted `.cnvault` database file. To help prevent data loss, it is strongly recommended to maintain regular backups of your database.
+
+* 📂 Back up your `.cnvault` database file regularly, especially after adding or modifying important information.
+* 🧩 Keep multiple backup copies instead of relying on a single file.
+* 🌍 Store backups in different locations whenever possible to reduce the risk of a single point of failure.
+* 🕒 Consider using dated filenames, such as `vault-2026-06-04.cnvault`, so older versions can be identified and restored if needed.
+* 🔐 Keep your master password in a safe place. Without the correct master password, the encrypted database cannot be recovered.
+* ✅ Periodically verify that your backup files can still be opened successfully with the correct master password.
+* 🚫 Do not rely solely on the default database location. Device failure, accidental deletion, theft, hardware damage, or operating system reinstallation may result in permanent data loss.
+
+### 🌍 Multi-location Backup Strategy
+
+Good backup habits are not only important for CipherNote Vault, but also for any valuable digital data.
+
+Consider maintaining multiple copies of important files in different locations.
+A simple multi-location backup strategy can significantly reduce the risk of data loss caused by hardware failure, accidental deletion, theft, fire, flooding, or other unexpected events.
+
+❤️ A backup only becomes valuable when it is available after something goes wrong. Please make sure both your `.cnvault` database file and your master password are stored safely and can be recovered when needed.
 
 ## 📄 License
 
-CipherNote Vault is released under the **GNU General Public License v3.0 only**. Source files include:
+🔓 **CipherNote Vault** and all files contained in this repository are licensed under the **GNU General Public License v3.0 only (GPL-3.0-only)**, unless explicitly stated otherwise.
+
+You are free to:
+
+* Use
+* Study
+* Modify
+* Redistribute
+
+this software under the terms of the GNU GPLv3 license.
+
+Any distributed derivative work must also comply with the GNU GPLv3 license.
+
+SPDX identifier:
 
 ```text
 SPDX-License-Identifier: GPL-3.0-only
 ```
 
-For GitHub, choose GNU GPLv3 or add the official GPLv3 text as `LICENSE`.
+⚠️ This software is provided **"as is"**, without any warranty. Use it at your own risk.
+
+❤️ If you find this project useful, feedback, bug reports, and contributions are always welcome.
