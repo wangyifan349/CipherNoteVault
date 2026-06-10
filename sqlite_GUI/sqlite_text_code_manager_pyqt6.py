@@ -1,7 +1,9 @@
 """
-This is a local text/code manager built with SQLite and PyQt6. It stores three kinds of user data: title, body, and remark. It supports adding records, double-click viewing, editing, deleting, smart search, importing a single file, importing files from a directory in bulk, and exporting selected records in bulk. When importing a file, the title is saved as the file name, the body is saved as the file content, and the remark is left empty. Search, import, and export operations run in worker threads so the interface remains responsive with large datasets.
-In the body window, Ctrl + mouse wheel adjusts only the body text font size. In the table, Ctrl+A selects all rows and Ctrl+D inverts the selection.
-Install and run: python -m pip install PyQt6 && python sqlite_text_code_manager_pyqt6_clean_en.py
+SQLite Text / Code Manager is a local desktop application built with Python, SQLite, and PyQt6. It stores plain-text records with only four fields: id, title, body, and remark. It does not use created time, updated time, or any timestamp fields.
+The program supports adding, editing, deleting, searching, importing, and exporting records. Records are listed in the main table, and a record can be opened by double-clicking its row. The detail window gives most of the space to the body text area, while the remark area is collapsed by default and can be shown with a small button.
+The program uses SQLite FTS5 for full-text search. Searching, loading records, importing files, importing directories, and exporting selected records run in worker threads so the interface remains responsive during larger operations.
+When importing a file, the file name is saved as the title, the file content is saved as the body, and the remark is left empty. When exporting records, each selected record is written as a separate file in the chosen directory;
+the file name is based on the title, and the file content contains the body text with the remark appended at the end if a remark exists.
 """
 import hashlib
 import re
