@@ -218,7 +218,7 @@ bc1qxqfhumpqtnxrznkx9r4xsp8m6zsedtgusjns7p
 
 ## 📄 License
 
-🔓 **CipherNote Vault** and all files contained in this repository are licensed under the **GNU General Public License v3.0 only (GPL-3.0-only)**, unless explicitly stated otherwise.
+🔓 **CipherNote Vault** and all files contained in this repository are licensed under the **GNU Affero General Public License v3.0 only (AGPL-3.0-only)**, unless explicitly stated otherwise.
 
 You are free to:
 
@@ -227,17 +227,18 @@ You are free to:
 * Modify
 * Redistribute
 
-this software under the terms of the GNU GPLv3 license.
+this software under the terms of the GNU AGPLv3 license.
 
-Any distributed derivative work must also comply with the GNU GPLv3 license.
+Any distributed derivative work must also comply with the GNU AGPLv3 license.
+
+If you modify this software and make it available for use over a network, you must also make the corresponding source code available to users interacting with it remotely, as required by the GNU AGPLv3 license.
 
 SPDX identifier:
 
 ```text
-SPDX-License-Identifier: GPL-3.0-only
+SPDX-License-Identifier: AGPL-3.0-only
 ```
 
-Please use this software with an understanding of its security boundary. Keep your database file, backups, and master password safe.
 
 ## 🙏 Feedback and contributions
 
