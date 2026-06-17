@@ -5,6 +5,24 @@ The program uses SQLite FTS5 for full-text search. Searching, loading records, i
 When importing a file, the file name is saved as the title, the file content is saved as the body, and the remark is left empty. When exporting records, each selected record is written as a separate file in the chosen directory;
 the file name is based on the title, and the file content contains the body text with the remark appended at the end if a remark exists.
 """
+
+"""
+sqlite_text_code_manager_pyqt6.py is a standalone local desktop application built with Python, PyQt6, and SQLite for managing plain-text records such as notes, text snippets, and code fragments.
+Each record is stored with a simple structure: id, title, body, and remark.
+The application supports adding, editing, deleting, searching, importing, and exporting records through a graphical interface.
+It also uses SQLite FTS5 for full-text search, and uses worker threads for operations such as loading, searching, importing, and exporting so the interface remains responsive when handling larger data sets.
+When importing files, the file name is used as the title and the file content is saved as the body; when exporting records, each selected record is written as a separate file.
+This script is released under the AGPL-3.0-only license.
+If sqlite_text_code_manager_pyqt6.py is helpful to you, you are welcome to sponsor or support its continued development through the following addresses: 
+Bitcoin: bc1qxqfhumpqtnxrznkx9r4xsp8m6zsedtgusjns7p
+Ethereum: 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
+SOL: B7N4e3KG9zWQBwMrtydS1B9wVBp2w62fAdryZdxAMBiz
+USDT(BNB Smart Chain): 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b.
+Thank you for your support.
+"""
+
+
+
 import hashlib
 import re
 import sqlite3
@@ -566,6 +584,18 @@ def make_unique_output_path(directory, filename, item_id):
         index += 1
 
 
+def enable_dialog_standard_window_buttons(dialog):
+    """Enable the standard title-bar buttons for custom QDialog windows."""
+    dialog.setWindowFlags(
+        dialog.windowFlags()
+        | Qt.WindowType.Window
+        | Qt.WindowType.WindowSystemMenuHint
+        | Qt.WindowType.WindowMinimizeButtonHint
+        | Qt.WindowType.WindowMaximizeButtonHint
+        | Qt.WindowType.WindowCloseButtonHint
+    )
+
+
 class QueryWorker(QThread):
     finished_ok = pyqtSignal(list, str)
     failed = pyqtSignal(str)
@@ -824,6 +854,7 @@ class ItemDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle(title)
+        enable_dialog_standard_window_buttons(self)
         self.resize(980, 760)
         self.read_only = read_only
         self.remark_visible = False
@@ -860,24 +891,29 @@ class ItemDialog(QDialog):
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(8)
 
-        main_layout.addWidget(QLabel("Title:"))
-        main_layout.addWidget(self.title_input)
+        # Keep the title label and input on the same row.
+        title_row_layout = QHBoxLayout()
+        title_row_layout.setContentsMargins(0, 0, 0, 0)
+        title_row_layout.setSpacing(6)
+        title_row_layout.addWidget(QLabel("Title:"))
+        title_row_layout.addWidget(self.title_input, 1)
+        main_layout.addLayout(title_row_layout)
+
         main_layout.addWidget(QLabel("Body:"))
         main_layout.addWidget(self.body_input, 1)
         main_layout.addWidget(self.remark_input)
 
-        remark_button_row = QHBoxLayout()
-        remark_button_row.addStretch(1)
-        remark_button_row.addWidget(self.remark_toggle_button)
-        main_layout.addLayout(remark_button_row)
-
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(6)
         button_layout.addStretch(1)
 
         if not read_only:
             ok_button = QPushButton("Save")
             ok_button.clicked.connect(self.accept)
             button_layout.addWidget(ok_button)
+
+        # Keep Remark immediately to the left of Close/Cancel at the bottom right.
+        button_layout.addWidget(self.remark_toggle_button)
 
         close_button = QPushButton("Close" if read_only else "Cancel")
         close_button.setObjectName("dangerButton")
@@ -904,6 +940,7 @@ class ImportDirectoryDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Import directory")
+        enable_dialog_standard_window_buttons(self)
         self.resize(760, 250)
 
         self.path_input = QLineEdit()
