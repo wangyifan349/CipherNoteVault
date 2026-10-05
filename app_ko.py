@@ -75,7 +75,7 @@ ARGON2ID_PARAMS = {
     "memory_cost": 256 * 1024,
 }
 
-DONATION_BTC = "bc1qxqfhumpqtnxrznkx9r4xsp8m6zsedtgusjns7p"
+DONATION_BTC = "bc1qwhzzk5tx07592vkf97rt8x8v0zdntad8lexnrgv3gdmecg8pfmhqzceedl"
 DONATION_ETH = "0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b"
 DONATION_BNB = "0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b"
 
