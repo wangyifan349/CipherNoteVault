@@ -15,7 +15,6 @@ import secrets
 import string
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,7 +23,7 @@ try:
     from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
     from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
     from PyQt6.QtCore import Qt, QTimer, QPoint
-    from PyQt6.QtGui import QAction, Qフォント, QKeySequence, QShortcut
+    from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
     from PyQt6.QtWidgets import (
         QApplication,
         QAbstractItemView,
@@ -37,16 +36,18 @@ try:
         QHBoxLayout,
         QHeaderView,
         QLabel,
-        QLine編集,
+        QLineEdit,
         QMainWindow,
         QMenu,
         QMessageBox,
         QRadioButton,
         QPushButton,
-        QPlainText編集,
+        QPlainTextEdit,
         QSplitter,
         QSlider,
         QSpinBox,
+        QStyle,
+        QStyledItemDelegate,
         QTabWidget,
         QTableWidget,
         QTableWidgetItem,
@@ -55,7 +56,7 @@ try:
         QWidget,
     )
 except ImportError as exc:
-    print("缺少依赖。请运行：pip install PyQt6 \"cryptography>=44.0.0\"")
+    print("依存パッケージが不足しています。次を実行してください：pip install PyQt6 \"cryptography>=44.0.0\"")
     print(exc)
     raise
 
@@ -84,16 +85,6 @@ WINDOWS_DISPLAY_AFFINITY_EXCLUDE_FROM_CAPTURE = 0x00000011
 WINDOWS_DISPLAY_AFFINITY_MONITOR_ONLY = 0x00000001
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def readable_time(value: str) -> str:
-    if not value:
-        return ""
-    return value.replace("T", " ").replace("+00:00", " UTC")
-
-
 def b64e(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
@@ -117,7 +108,7 @@ def derive_key(master_password: str, salt: bytes, kdf: Dict[str, Any]) -> bytes:
     if not master_password:
         raise ValueError("マスターパスワードは空にできません。")
     if kdf.get("name") != "Argon2id":
-        raise ValueError("Unsupported key derivation algorithm.")
+        raise ValueError("未対応の鍵導出アルゴリズムです。")
 
     return Argon2id(
         salt=salt,
@@ -135,8 +126,6 @@ def empty_payload() -> Dict[str, Any]:
         "app": APP_NAME,
         "app_version": APP_VERSION,
         "items": [],
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
     }
 
 
@@ -191,14 +180,14 @@ class Vault:
         try:
             outer = json.loads(self.path.read_text(encoding="utf-8"))
             if outer.get("format") != VAULT_FORMAT:
-                raise VaultError("CipherNote Vault データベースではありません。")
+                raise VaultError("これは CipherNote Vault のデータベースファイルではありません。")
             if outer.get("version") != VAULT_VERSION:
                 raise VaultError("未対応のデータベースバージョンです。")
             if outer.get("cipher") != "ChaCha20-Poly1305":
                 raise VaultError("未対応の暗号化アルゴリズムです。")
             kdf = outer.get("kdf")
             if not isinstance(kdf, dict) or kdf.get("name") != "Argon2id":
-                raise VaultError("KDF パラメータが無効です。")
+                raise VaultError("データベースの KDF パラメータが無効です。")
             salt_b64 = outer["salt"]
             salt = b64d(salt_b64)
             nonce = b64d(outer["nonce"])
@@ -206,7 +195,7 @@ class Vault:
         except VaultError:
             raise
         except Exception as exc:
-            raise VaultError("データベースファイルが破損しているか、形式が無効です。") from exc
+            raise VaultError("データベースファイルが破損しているか、形式が正しくありません。") from exc
 
         key = derive_key(master_password, salt, kdf)
 
@@ -214,15 +203,15 @@ class Vault:
             aad = make_aad(kdf, salt_b64)
             plaintext = ChaCha20Poly1305(key).decrypt(nonce, ciphertext, aad)
         except InvalidTag as exc:
-            raise VaultError("マスターパスワードが違うか、データベースが改ざんされています。") from exc
+            raise VaultError("マスターパスワードが違うか、データベースファイルが改ざんされています。") from exc
 
         try:
             payload = json.loads(plaintext.decode("utf-8"))
         except Exception as exc:
-            raise VaultError("The decrypted database content is corrupted.") from exc
+            raise VaultError("復号したデータベースの内容が破損しています。") from exc
 
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise VaultError("Invalid database content format.")
+            raise VaultError("データベースの内容の形式が無効です。")
 
         self.key = key
         self.salt = salt
@@ -233,8 +222,12 @@ class Vault:
         if self.key is None or self.salt is None:
             raise VaultError("データベースはロックされています。")
 
-        self.payload["updated_at"] = now_iso()
-        plaintext = json.dumps(self.payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        payload = {key: value for key, value in self.payload.items() if key not in ("created_at", "updated_at")}
+        payload["items"] = [
+            {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+            for item in self.payload.get("items", [])
+        ]
+        plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
         nonce = os.urandom(12)
         salt_b64 = b64e(self.salt)
@@ -255,6 +248,7 @@ class Vault:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(outer, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.path)
+        self.payload = payload
 
     def change_master_password(self, new_master_password: str) -> None:
         if self.key is None:
@@ -276,17 +270,26 @@ class Vault:
         return [item for item in items if item.get("type") == item_type]
 
     def upsert_item(self, item: Dict[str, Any]) -> None:
-        items = self.payload.setdefault("items", [])
-        item["updated_at"] = now_iso()
+        previous_payload = self.payload
+        items = list(previous_payload.get("items", []))
+        saved_item = {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+        saved_item.setdefault("id", str(uuid.uuid4()))
         for index, existing in enumerate(items):
-            if existing.get("id") == item.get("id"):
-                items[index] = item
-                self.save()
-                return
-        item.setdefault("id", str(uuid.uuid4()))
-        item.setdefault("created_at", now_iso())
-        items.append(item)
-        self.save()
+            if existing.get("id") == saved_item["id"]:
+                items[index] = saved_item
+                break
+        else:
+            items.append(saved_item)
+
+        self.payload = dict(previous_payload, items=items)
+        try:
+            self.save()
+        except Exception:
+            self.payload = previous_payload
+            raise
+        item.pop("created_at", None)
+        item.pop("updated_at", None)
+        item.update(saved_item)
 
     def delete_item(self, item_id: str) -> None:
         items = self.payload.setdefault("items", [])
@@ -303,7 +306,7 @@ class StartupDialog(QDialog):
 
         title_label = QLabel("CipherNote Vault")
         title_label.setObjectName("DialogTitle")
-        subtitle_label = QLabel("ローカル暗号化パスワード管理・セキュアノートアプリです。すべての内容は Argon2id + ChaCha20-Poly1305 で保護されます。")
+        subtitle_label = QLabel("ローカルで暗号化するパスワード管理・セキュアノートアプリです。すべてのデータベース内容を Argon2id + ChaCha20-Poly1305 で暗号化して保存します。")
         subtitle_label.setObjectName("SubtleLabel")
         subtitle_label.setWordWrap(True)
 
@@ -330,7 +333,7 @@ class StartupDialog(QDialog):
         mode_layout.addWidget(self.create_database_radio)
         mode_layout.addStretch(1)
 
-        self.path_edit = QLine編集(str(DEFAULT_VAULT))
+        self.path_edit = QLineEdit(str(DEFAULT_VAULT))
         self.path_edit.setPlaceholderText(".cnvault データベースファイルを選択")
         browse_button = QPushButton("参照")
         browse_button.clicked.connect(self.browse)
@@ -339,20 +342,20 @@ class StartupDialog(QDialog):
         path_layout.addWidget(self.path_edit, 1)
         path_layout.addWidget(browse_button)
 
-        self.password_edit = QLine編集()
-        self.password_edit.setEchoMode(QLine編集.EchoMode.Password)
-        self.confirm_edit = QLine編集()
-        self.confirm_edit.setEchoMode(QLine編集.EchoMode.Password)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_edit = QLineEdit()
+        self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("SubtleLabel")
         self.status_label.setWordWrap(True)
 
         form_layout = QFormLayout()
-        form_layout.addRow("操作:", mode_frame)
-        form_layout.addRow("データベースファイル:", path_layout)
-        form_layout.addRow("マスターパスワード:", self.password_edit)
-        form_layout.addRow("マスターパスワード確認:", self.confirm_edit)
+        form_layout.addRow("操作：", mode_frame)
+        form_layout.addRow("データベースファイル：", path_layout)
+        form_layout.addRow("マスターパスワード：", self.password_edit)
+        form_layout.addRow("マスターパスワードの確認：", self.confirm_edit)
         form_layout.addRow("", self.status_label)
 
         self.ok_button = QPushButton("データベースを開く")
@@ -380,28 +383,28 @@ class StartupDialog(QDialog):
             self.setWindowTitle("新しいデータベースを作成 - CipherNote Vault")
             self.ok_button.setText("データベースを作成")
             self.confirm_edit.setEnabled(True)
-            self.status_label.setText("現在の操作: 新しいデータベースを強力な暗号化設定で作成します。")
+            self.status_label.setText("現在の操作：強力な暗号化設定で新しいローカルデータベースを作成します。")
         else:
             self.mode = "open"
             self.setWindowTitle("データベースを開く - CipherNote Vault")
             self.ok_button.setText("データベースを開く")
             self.confirm_edit.setEnabled(False)
-            self.status_label.setText("現在の操作: 既存のデータベースを開きます。.cnvault ファイルを選択し、マスターパスワードを入力してください。")
+            self.status_label.setText("現在の操作：既存のデータベースを開きます。.cnvault ファイルを選択し、マスターパスワードを入力してください。")
 
     def browse(self):
         if self.mode == "create":
-            selected_filename, _ = QFileDialog.get保存FileName(
+            selected_filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Create CipherNote Vault database",
+                "CipherNote Vault データベースを作成",
                 self.path_edit.text() or str(DEFAULT_VAULT),
-                "CipherNote Vault (*.cnvault);;JSON Files (*.json);;All Files (*)",
+                "CipherNote Vault (*.cnvault);;JSON ファイル (*.json);;すべてのファイル (*)",
             )
         else:
             selected_filename, _ = QFileDialog.getOpenFileName(
                 self,
-                "Open CipherNote Vault database",
+                "CipherNote Vault データベースを開く",
                 self.path_edit.text() or str(DEFAULT_VAULT_DIR),
-                "CipherNote Vault (*.cnvault);;JSON Files (*.json);;All Files (*)",
+                "CipherNote Vault (*.cnvault);;JSON ファイル (*.json);;すべてのファイル (*)",
             )
         if selected_filename:
             self.path_edit.setText(selected_filename)
@@ -421,11 +424,8 @@ class StartupDialog(QDialog):
             return None
 
         if self.mode == "create":
-            if len(master_password) < 12:
-                QMessageBox.warning(self, "マスターパスワードが短すぎます", "マスターパスワードは12文字以上、できれば長いパスフレーズを推奨します。")
-                return None
             if master_password != self.confirm_edit.text():
-                QMessageBox.warning(self, "パスワードが一致しません", "2つのマスターパスワードが一致しません。")
+                QMessageBox.warning(self, "パスワードが一致しません", "入力した2つのマスターパスワードが一致しません。")
                 return None
             if database_path.exists():
                 answer = QMessageBox.question(self, "ファイルは既に存在します", "このファイルは既に存在します。続行すると上書きされます。よろしいですか？")
@@ -458,7 +458,7 @@ class PasswordGeneratorDialog(QDialog):
         self.include_symbols_checkbox.setChecked(True)
 
         form_layout = QFormLayout()
-        form_layout.addRow("パスワード長:", self.password_length_spinbox)
+        form_layout.addRow("パスワードの長さ：", self.password_length_spinbox)
         form_layout.addRow("", self.include_alnum_checkbox)
         form_layout.addRow("", self.use_mixed_case_checkbox)
         form_layout.addRow("", self.include_symbols_checkbox)
@@ -495,12 +495,12 @@ class PasswordGeneratorDialog(QDialog):
             character_groups.append("!@#$%^&*()-_=+[]{}:,.?")
 
         if not character_groups:
-            QMessageBox.warning(self, "条件がありません", "少なくとも1つの条件を選択してください。")
+            QMessageBox.warning(self, "条件がありません", "パスワードの条件を少なくとも1つ選択してください。")
             return None
 
         password_length = self.password_length_spinbox.value()
         if password_length < len(character_groups):
-            QMessageBox.warning(self, "Length is too short", "Password length cannot be smaller than the number of selected character groups.")
+            QMessageBox.warning(self, "文字数が足りません", "パスワードの長さは、選択した文字グループ数以上にしてください。")
             return None
 
         character_pool = "".join(character_groups)
@@ -522,15 +522,15 @@ class PasswordDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
 
-        self.title_edit = QLine編集(self.item.get("title", ""))
-        self.username_edit = QLine編集(self.item.get("username", ""))
-        self.password_edit = QLine編集(self.item.get("password", ""))
-        self.password_edit.setEchoMode(QLine編集.EchoMode.Password)
-        self.notes_edit = QPlainText編集(self.item.get("notes", ""))
+        self.title_edit = QLineEdit(self.item.get("title", ""))
+        self.username_edit = QLineEdit(self.item.get("username", ""))
+        self.password_edit = QLineEdit(self.item.get("password", ""))
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.notes_edit = QPlainTextEdit(self.item.get("notes", ""))
 
         self.strength_label = QLabel("")
         self.strength_label.setObjectName("SubtleLabel")
-        self.password_edit.text変更済み.connect(self.update_strength)
+        self.password_edit.textChanged.connect(self.update_strength)
         self.update_strength()
 
         show_password_button = QPushButton("表示/非表示")
@@ -544,11 +544,11 @@ class PasswordDialog(QDialog):
         password_row.addWidget(generate_password_button)
 
         form_layout = QFormLayout()
-        form_layout.addRow("タイトル:", self.title_edit)
-        form_layout.addRow("ユーザー名:", self.username_edit)
-        form_layout.addRow("パスワード:", password_row)
+        form_layout.addRow("タイトル：", self.title_edit)
+        form_layout.addRow("ユーザー名：", self.username_edit)
+        form_layout.addRow("パスワード：", password_row)
         form_layout.addRow("", self.strength_label)
-        form_layout.addRow("メモ:", self.notes_edit)
+        form_layout.addRow("メモ：", self.notes_edit)
 
         save_button = QPushButton("保存")
         cancel_button = QPushButton("キャンセル")
@@ -567,22 +567,22 @@ class PasswordDialog(QDialog):
     def update_strength(self):
         password_value = self.password_edit.text()
         self.strength_label.setText(
-            "パスワード強度: 未入力"
+            "パスワード強度：未入力"
             if not password_value
-            else f"パスワード強度: {password_strength_label(password_value)}"
+            else f"パスワード強度：{password_strength_label(password_value)}"
         )
 
     def toggle_password_visibility(self):
-        if self.password_edit.echoMode() == QLine編集.EchoMode.パスワード:
-            self.password_edit.setEchoMode(QLine編集.EchoMode.Normal)
+        if self.password_edit.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
         else:
-            self.password_edit.setEchoMode(QLine編集.EchoMode.Password)
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
     def generate_password(self):
         generated_password = PasswordGeneratorDialog(parent=self).generate()
         if generated_password:
             self.password_edit.setText(generated_password)
-            self.password_edit.setEchoMode(QLine編集.EchoMode.Normal)
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
 
     def get_item(self) -> Optional[Dict[str, Any]]:
         if self.exec() != QDialog.DialogCode.Accepted:
@@ -600,8 +600,6 @@ class PasswordDialog(QDialog):
             "username": self.username_edit.text().strip(),
             "password": self.password_edit.text(),
             "notes": self.notes_edit.toPlainText(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
 
@@ -620,28 +618,28 @@ class NoteDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
 
-        self.title_edit = QLine編集(self.item.get("title", ""))
-        self.title_edit.setPlaceholderText("ノートタイトル")
-        self.content_edit = QPlainText編集(self.item.get("content", ""))
-        self.content_edit.setObjectName("NoteContent編集or")
-        self.content_edit.setPlaceholderText("大切なノートをここに書いてください...")
+        self.title_edit = QLineEdit(self.item.get("title", ""))
+        self.title_edit.setPlaceholderText("ノートのタイトル")
+        self.content_edit = QPlainTextEdit(self.item.get("content", ""))
+        self.content_edit.setObjectName("NoteContentEditor")
+        self.content_edit.setPlaceholderText("大切なノートをここに書いてください…")
 
         self.note_font_slider = QSlider(Qt.Orientation.Horizontal)
         self.note_font_slider.setRange(12, 36)
         self.note_font_slider.setValue(int(self.item.get("font_size", 18) or 18))
         self.note_font_slider.setFixedWidth(180)
-        self.note_font_slider.value変更済み.connect(self.apply_note_font_size)
+        self.note_font_slider.valueChanged.connect(self.apply_note_font_size)
 
         self.note_font_size_label = QLabel(f"フォント {self.note_font_slider.value()}")
         self.note_font_size_label.setObjectName("SubtleLabel")
-        self.save_status_label = QLabel("Ctrl+Sで保存、閉じません")
+        self.save_status_label = QLabel("Ctrl+Sでウィンドウを閉じずに保存")
         self.save_status_label.setObjectName("SubtleLabel")
 
         title_layout = QHBoxLayout()
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(8)
-        title_label = QLabel("Title")
-        title_label.setObjectName("検索Label")
+        title_label = QLabel("タイトル")
+        title_label.setObjectName("SearchLabel")
         title_label.setFixedWidth(44)
         title_layout.addWidget(title_label)
         title_layout.addWidget(self.title_edit, 1)
@@ -651,7 +649,7 @@ class NoteDialog(QDialog):
         save_button.clicked.connect(self.save_without_closing)
         close_button.clicked.connect(self.close)
 
-        save_shortcut = QShortcut(QKeySequence.StandardKey.保存, self)
+        save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
         save_shortcut.activated.connect(self.save_without_closing)
 
         bottom_layout = QHBoxLayout()
@@ -676,9 +674,9 @@ class NoteDialog(QDialog):
         self.apply_note_font_size()
 
     def apply_note_font_size(self):
-        note_font = Qフォント("Microsoft YaHei")
+        note_font = QFont("Microsoft YaHei")
         note_font.setPointSize(self.note_font_slider.value())
-        self.content_edit.setフォント(note_font)
+        self.content_edit.setFont(note_font)
         self.note_font_size_label.setText(f"フォント {self.note_font_slider.value()}")
 
     def build_note_item(self) -> Optional[Dict[str, Any]]:
@@ -693,8 +691,6 @@ class NoteDialog(QDialog):
             "title": note_title,
             "content": self.content_edit.toPlainText(),
             "font_size": self.note_font_slider.value(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
     def save_without_closing(self):
@@ -702,11 +698,17 @@ class NoteDialog(QDialog):
         if note_item is None:
             return
 
-        self.item = note_item
-        if self.on_save is not None:
+        try:
+            if self.on_save is None:
+                raise VaultError("データベースへの保存機能に接続されていません。ノートは保存されていません。")
             self.on_save(note_item)
+        except Exception as exc:
+            self.save_status_label.setText("保存に失敗しました。内容はエディターに残っています。再試行してください。")
+            QMessageBox.critical(self, "保存に失敗しました", str(exc))
+            return
 
-        self.save_status_label.setText(f"保存済み: {readable_time(note_item.get('updated_at', ''))}")
+        self.item = note_item
+        self.save_status_label.setText("保存済み")
 
     def get_item(self) -> Optional[Dict[str, Any]]:
         if self.exec() != QDialog.DialogCode.Accepted:
@@ -720,18 +722,18 @@ class MasterPasswordDialog(QDialog):
         self.setWindowTitle("マスターパスワードを変更")
         self.setMinimumWidth(520)
 
-        self.password_edit = QLine編集()
-        self.password_edit.setEchoMode(QLine編集.EchoMode.Password)
-        self.confirm_edit = QLine編集()
-        self.confirm_edit.setEchoMode(QLine編集.EchoMode.Password)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_edit = QLineEdit()
+        self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
-        hint = QLabel("Changing the master password regenerates the salt and re-encrypts the database using a new Argon2id-derived key.")
+        hint = QLabel("マスターパスワードを変更するとソルトを再生成し、新しい Argon2id 導出鍵でデータベースを再暗号化します。")
         hint.setObjectName("SubtleLabel")
         hint.setWordWrap(True)
 
         form = QFormLayout()
-        form.addRow("新しいマスターパスワード:", self.password_edit)
-        form.addRow("マスターパスワード確認:", self.confirm_edit)
+        form.addRow("新しいマスターパスワード：", self.password_edit)
+        form.addRow("マスターパスワードの確認：", self.confirm_edit)
 
         save_btn = QPushButton("変更")
         cancel_btn = QPushButton("キャンセル")
@@ -753,25 +755,25 @@ class MasterPasswordDialog(QDialog):
             return None
 
         password = self.password_edit.text()
-        if len(password) < 12:
-            QMessageBox.warning(self, "マスターパスワードが短すぎます", "The master password should be at least 12 characters.")
-            return None
         if password != self.confirm_edit.text():
-            QMessageBox.warning(self, "パスワードが一致しません", "2つのマスターパスワードが一致しません。")
+            QMessageBox.warning(self, "パスワードが一致しません", "入力した2つのマスターパスワードが一致しません。")
             return None
         return password
+
+
+class NoFocusItemDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
 
 
 class DetailCard(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("Card")
-        self.title = QLabel("項目を選択")
+        self.title = QLabel("項目を選択してください")
         self.title.setObjectName("CardTitle")
         self.title.setWordWrap(True)
-        self.meta = QLabel("")
-        self.meta.setObjectName("SubtleLabel")
-        self.meta.setWordWrap(True)
         self.body = QLabel("")
         self.body.setObjectName("BodyLabel")
         self.body.setWordWrap(True)
@@ -779,37 +781,22 @@ class DetailCard(QFrame):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title)
-        layout.addWidget(self.meta)
         layout.addSpacing(10)
         layout.addWidget(self.body, 1)
 
     def show_password_item(self, item: Optional[Dict[str, Any]]):
         if not item:
-            self.title.setText("请选择一条密码记录")
-            self.meta.setText("")
-            self.body.setText("左侧列表支持搜索；双击记录可以編集。")
+            self.title.setText("パスワード項目を選択してください")
+            self.body.setText("左の一覧を検索できます。項目をダブルクリックすると編集できます。")
             return
 
         masked = "•" * min(max(len(item.get("password", "")), 8), 24)
         self.title.setText(item.get("title", ""))
-        self.meta.setText(f"更新: {readable_time(item.get('updated_at', ''))}")
         self.body.setText(
-            f"ユーザー名:{item.get('username', '')}\n"
-            f"パスワード:{masked}\n\n"
-            f"メモ:\n{item.get('notes', '')}"
+            f"ユーザー名：{item.get('username', '')}\n"
+            f"パスワード：{masked}\n\n"
+            f"メモ：\n{item.get('notes', '')}"
         )
-
-    def show_note_item(self, item: Optional[Dict[str, Any]]):
-        if not item:
-            self.title.setText("请选择一条セキュリティ笔记")
-            self.meta.setText("")
-            self.body.setText("左侧列表支持搜索；双击记录可以打开編集。")
-            return
-
-        self.title.setText(item.get("title", ""))
-        self.meta.setText(f"更新: {readable_time(item.get('updated_at', ''))}")
-        self.body.setText(item.get("content", ""))
-
 
 class MainWindow(QMainWindow):
     def __init__(self, vault: Vault):
@@ -823,20 +810,19 @@ class MainWindow(QMainWindow):
         self.note_items_all: List[Dict[str, Any]] = []
         self.note_items_view: List[Dict[str, Any]] = []
 
-        self.search_edit = QLine編集()
-        self.search_edit.setPlaceholderText("タイトル、ユーザー名、メモ、ノート内容を検索")
-        self.search_edit.text変更済み.connect(self.apply_filter)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("タイトル、ユーザー名、メモ、ノートの内容を検索")
+        self.search_edit.textChanged.connect(self.apply_filter)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.password_table = self.make_table(["Title", "ユーザー名", "メモ", "更新"])
-        self.note_table = self.make_table(["Title", "更新"])
+        self.password_table = self.make_table(["タイトル", "ユーザー名", "メモ"])
+        self.password_table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 8px; }")
+        self.note_table = self.make_table(["タイトル"])
+        self.note_table.horizontalHeader().hide()
         self.password_detail = DetailCard()
-        self.note_detail = DetailCard()
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.note_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.tabs.addTab(self.make_password_tab(), "パスワード管理")
         self.tabs.addTab(self.make_note_tab(), "セキュアノート")
@@ -855,7 +841,7 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(10, 8, 10, 8)
         top_layout.setSpacing(8)
         search_label = QLabel("検索")
-        search_label.setObjectName("検索Label")
+        search_label.setObjectName("SearchLabel")
         search_label.setMinimumWidth(86)
         search_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_layout.addWidget(search_label)
@@ -869,7 +855,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main)
 
         self.password_table.itemClicked.connect(self.show_clicked_password_detail)
-        self.note_table.itemClicked.connect(self.show_clicked_note_detail)
         self.password_table.doubleClicked.connect(self.edit_password)
         self.note_table.doubleClicked.connect(self.edit_note)
 
@@ -917,7 +902,7 @@ class MainWindow(QMainWindow):
         info_action.triggered.connect(self.show_database_info)
         toolbar.addAction(info_action)
 
-        donate_action = QAction("スポンサー", self)
+        donate_action = QAction("支援", self)
         donate_action.triggered.connect(self.show_donation)
         toolbar.addAction(donate_action)
 
@@ -927,10 +912,11 @@ class MainWindow(QMainWindow):
 
     def make_table(self, headers: List[str]) -> QTableWidget:
         table = QTableWidget(0, len(headers))
+        table.setItemDelegate(NoFocusItemDelegate(table))
         table.setHorizontalHeaderLabels(headers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        table.set編集Triggers(QAbstractItemView.編集Trigger.No編集Triggers)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setStretchLastSection(True)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -954,10 +940,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-        self.note_splitter.addWidget(self.note_table)
-        self.note_splitter.addWidget(self.note_detail)
-        self.note_splitter.setSizes([1240, 0])
-        layout.addWidget(self.note_splitter, 1)
+        layout.addWidget(self.note_table, 1)
         return page
 
     def setup_context_menus(self):
@@ -1026,19 +1009,17 @@ class MainWindow(QMainWindow):
             self.vault.all_items("note"),
             key=self.note_sort_key,
         )
-        self.status_label.setText(f"Passwords {len(self.password_items_all)} · メモ {len(self.note_items_all)} · 強力な暗号化")
+        self.status_label.setText(f"パスワード {len(self.password_items_all)} 件 · ノート {len(self.note_items_all)} 件 · 強力な暗号化")
         self.apply_filter()
 
     def password_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
         username_value = str(item.get("username", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, username_value, updated_value)
+        return (title_value, username_value)
 
     def note_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, updated_value)
+        return title_value
 
     def apply_filter(self):
         keyword = self.search_edit.text().strip().lower()
@@ -1056,16 +1037,14 @@ class MainWindow(QMainWindow):
 
     def hide_details(self):
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter.setSizes([1240, 0])
-        self.note_splitter.setSizes([1240, 0])
 
     def refresh_password_table(self):
         self.password_table.setRowCount(0)
         for item in self.password_items_view:
             row = self.password_table.rowCount()
             self.password_table.insertRow(row)
-            values = [item.get("title", ""), item.get("username", ""), item.get("notes", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", ""), item.get("username", ""), item.get("notes", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1076,7 +1055,7 @@ class MainWindow(QMainWindow):
         for item in self.note_items_view:
             row = self.note_table.rowCount()
             self.note_table.insertRow(row)
-            values = [item.get("title", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1101,23 +1080,16 @@ class MainWindow(QMainWindow):
             self.password_detail.show()
             self.password_splitter.setSizes([820, 390])
 
-    def show_clicked_note_detail(self, *_args):
-        item = self.selected_note()
-        if item:
-            self.note_detail.show_note_item(item)
-            self.note_detail.show()
-            self.note_splitter.setSizes([820, 390])
-
     def require_password_selection(self) -> Optional[Dict[str, Any]]:
         item = self.selected_password()
         if item is None:
-            QMessageBox.information(self, "項目を選択", "先にパスワード項目を選択してください。")
+            QMessageBox.information(self, "項目を選択してください", "先にパスワード項目を選択してください。")
         return item
 
     def require_note_selection(self) -> Optional[Dict[str, Any]]:
         item = self.selected_note()
         if item is None:
-            QMessageBox.information(self, "項目を選択", "先にノートを選択してください。")
+            QMessageBox.information(self, "項目を選択してください", "先にノートを選択してください。")
         return item
 
     def add_password(self):
@@ -1139,7 +1111,7 @@ class MainWindow(QMainWindow):
         item = self.require_password_selection()
         if not item:
             return
-        answer = QMessageBox.question(self, "削除の確認", f"削除 “{item.get('title', '')}”?")
+        answer = QMessageBox.question(self, "削除の確認", f"「{item.get('title', '')}」を削除しますか？")
         if answer == QMessageBox.StandardButton.Yes:
             self.vault.delete_item(item["id"])
             self.refresh_all()
@@ -1152,7 +1124,7 @@ class MainWindow(QMainWindow):
     def copy_password(self):
         item = self.require_password_selection()
         if item:
-            self.copy_to_clipboard(item.get("password", ""), "パスワードをコピーしました。30秒後にクリップボードを消去します。", auto_clear=True)
+            self.copy_to_clipboard(item.get("password", ""), "パスワードをコピーしました。30秒後にクリップボードを自動消去します。", auto_clear=True)
 
     def copy_to_clipboard(self, text: str, message: str, auto_clear: bool = False):
         QApplication.clipboard().setText(text)
@@ -1164,25 +1136,29 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(30_000, clear_clipboard)
 
     def add_note(self):
-        item = NoteDialog(parent=self).get_item()
-        if item:
-            self.vault.upsert_item(item)
-            self.refresh_all()
+        NoteDialog(parent=self, on_save=self.save_note).exec()
+
+    def save_note(self, item: Dict[str, Any]) -> None:
+        self.vault.upsert_item(item)
+        self.refresh_all()
+        if not any(note.get("id") == item["id"] for note in self.note_items_view):
+            self.search_edit.clear()
+        for row, note in enumerate(self.note_items_view):
+            if note.get("id") == item["id"]:
+                self.note_table.selectRow(row)
+                break
 
     def edit_note(self, *_args):
         item = self.require_note_selection()
         if not item:
             return
-        updated = NoteDialog(item=item, parent=self).get_item()
-        if updated:
-            self.vault.upsert_item(updated)
-            self.refresh_all()
+        NoteDialog(item=item, parent=self, on_save=self.save_note).exec()
 
     def delete_note(self):
         item = self.require_note_selection()
         if not item:
             return
-        answer = QMessageBox.question(self, "削除の確認", f"削除 “{item.get('title', '')}”?")
+        answer = QMessageBox.question(self, "削除の確認", f"「{item.get('title', '')}」を削除しますか？")
         if answer == QMessageBox.StandardButton.Yes:
             self.vault.delete_item(item["id"])
             self.refresh_all()
@@ -1190,18 +1166,18 @@ class MainWindow(QMainWindow):
     def force_save(self):
         try:
             self.vault.save()
-            QMessageBox.information(self, "保存d", "データベースを保存しました。")
+            QMessageBox.information(self, "保存済み", "データベースを保存しました。")
         except Exception as exc:
-            QMessageBox.critical(self, "保存 failed", str(exc))
+            QMessageBox.critical(self, "保存に失敗しました", str(exc))
 
     def change_master_password(self):
         new_password = MasterPasswordDialog(parent=self).get_password()
         if new_password:
             try:
                 self.vault.change_master_password(new_password)
-                QMessageBox.information(self, "変更済み", "The master password has been changed and the database has been re-encrypted with the new key.")
+                QMessageBox.information(self, "変更済み", "マスターパスワードを変更し、新しい鍵でデータベースを再暗号化して保存しました。")
             except Exception as exc:
-                QMessageBox.critical(self, "変更 failed", str(exc))
+                QMessageBox.critical(self, "変更に失敗しました", str(exc))
 
     def lock_and_exit(self):
         self.vault.lock()
@@ -1220,18 +1196,18 @@ class MainWindow(QMainWindow):
 
     def show_database_info(self):
         message = (
-            f"Application: {APP_NAME} {APP_VERSION}\n"
-            f"File: {self.vault.path}\n"
-            f"Algorithm: Argon2id + ChaCha20-Poly1305\n"
-            f"Argon2id：iterations={self.vault.kdf.get('iterations')}，lanes={self.vault.kdf.get('lanes')}，memory={self.vault.kdf.get('memory_cost')} KiB\n"
-            f"Password entries: {len(self.password_items_all)}\n"
-            f"セキュアノート: {len(self.note_items_all)}"
+            f"アプリ：{APP_NAME} {APP_VERSION}\n"
+            f"ファイル：{self.vault.path}\n"
+            f"アルゴリズム：Argon2id + ChaCha20-Poly1305\n"
+            f"Argon2id：反復回数={self.vault.kdf.get('iterations')}、レーン数={self.vault.kdf.get('lanes')}、メモリ={self.vault.kdf.get('memory_cost')} KiB\n"
+            f"パスワード項目：{len(self.password_items_all)}\n"
+            f"セキュアノート：{len(self.note_items_all)}"
         )
         QMessageBox.information(self, "データベース情報", message)
 
     def show_donation(self):
         message = (
-            f"このプロジェクトが役に立った場合は、作者を支援できます。\n\n"
+            f"このプロジェクトが役に立ったら、作者をご支援いただけます。\n\n"
             f"Bitcoin：{DONATION_BTC}\n"
             f"Ethereum：{DONATION_ETH}\n"
             f"BNB Smart Chain：{DONATION_BNB}"
@@ -1240,13 +1216,13 @@ class MainWindow(QMainWindow):
 
     def show_security_notes(self):
         message = (
-            "CipherNote Vault uses Argon2id to derive a 256-bit key from the master password and uses ChaCha20-Poly1305 to authenticated-encrypt the entire database.\n\n"
-            "Password entries and secure notes are stored in the same encrypted payload. The database file only stores the salt, nonce, KDF parameters, and ciphertext.\n\n"
-            "Saving uses a temporary file and atomic replacement to reduce the risk of corruption caused by interrupted writes.\n\n"
-            "On Windows, the program attempts to enable SetWindowDisplayAffinity to reduce ordinary screenshot and screen-recording capture.\n\n"
-            "セキュリティ boundary: this program cannot defend against malware that already controls the machine, phone photography, administrator-level screen capture, keyloggers, clipboard monitoring, or memory dumps. Full-disk encryption is recommended."
+            "CipherNote Vault は Argon2id でマスターパスワードから256ビットの鍵を導出し、ChaCha20-Poly1305 でデータベース全体を認証付き暗号化します。\n\n"
+            "パスワード項目とセキュアノートは同じ暗号化ペイロードに格納されます。ディスク上のデータベースファイルにはソルト、ノンス、KDF パラメータ、暗号文のみを保存します。\n\n"
+            "保存には一時ファイルとアトミックな置換を使用し、書き込みの中断によるファイル破損のリスクを軽減します。\n\n"
+            "Windows では SetWindowDisplayAffinity を有効にし、通常のスクリーンショットや画面録画によるキャプチャを防ぐよう試みます。\n\n"
+            "セキュリティ上の限界：本アプリは、端末を既に制御しているマルウェア、スマートフォンでの撮影、管理者権限での画面キャプチャ、キー入力の記録、クリップボードの監視、メモリダンプには対応できません。ディスク暗号化との併用を推奨します。"
         )
-        QMessageBox.information(self, "セキュリティメモ", message)
+        QMessageBox.information(self, "セキュリティについて", message)
 
 
 def set_app_style(app: QApplication):
@@ -1260,7 +1236,7 @@ def set_app_style(app: QApplication):
         QMainWindow, QDialog {
             background-color: #8A1F00;
         }
-        QLine編集, QPlainText編集, QTableWidget {
+        QLineEdit, QPlainTextEdit, QTableWidget {
             background-color: #6F1A00;
             color: #FFF700;
             border: 1px solid #C86F00;
@@ -1269,7 +1245,7 @@ def set_app_style(app: QApplication):
             selection-background-color: #B45300;
             selection-color: #FFF700;
         }
-        QPlainText編集 { line-height: 1.5em; }
+        QPlainTextEdit { line-height: 1.5em; }
         QTableWidget {
             gridline-color: #9A3400;
             alternate-background-color: #7C1D00;
@@ -1398,7 +1374,7 @@ def set_app_style(app: QApplication):
             border-radius: 10px;
             padding: 12px;
         }
-        QLabel#検索Label {
+        QLabel#SearchLabel {
             font-weight: 800;
             color: #FDE600;
         }
@@ -1433,7 +1409,7 @@ def bootstrap_vault(parent=None) -> Optional[Vault]:
                 vault.unlock(result["password"])
             return vault
         except Exception as exc:
-            QMessageBox.critical(parent, "数据库打开失败", str(exc))
+            QMessageBox.critical(parent, "データベースを開けませんでした", str(exc))
 
     return None
 

@@ -12,19 +12,21 @@ This release includes five UI entry points:
 
 ```text
 CipherNoteVault_en.py  English
-CipherNoteVault_zh.py  Chinese
-CipherNoteVault_ja.py  Japanese
-CipherNoteVault_ko.py  Korean
-CipherNoteVault_es.py  Spanish
+app_zh.py              Chinese
+app_ja.py              Japanese
+app_ko.py              Korean
+app_es.py              Spanish
 ```
 
 All language versions use the same `.cnvault` database format and the same cryptographic design.
+
+The four translated entry points follow the current `app_zh.py` implementation, including note saving, save-failure handling, and the simplified lists. Each file can run independently.
 
 ## 🔎 Workflow
 
 Create a new `.cnvault` database or open an existing one from any location. The main search box searches password titles, usernames, password notes, note titles, and note content. Lists use stable title-first sorting.
 
-Right-click blank space to add a password or note. Right-click an existing item to edit or delete it. Notes preview on single click and open for editing on double click.
+Right-click blank space to add a password or note. Right-click an existing item to edit or delete it. Password details appear on single click. Notes open for editing on double click, with a title-only list and no preview pane or timestamp columns.
 
 ## 🗒️ Notes editor
 
@@ -34,8 +36,9 @@ The note editor is made for real daily use:
 * Clean and uncluttered body area
 * Font-size slider
 * `Ctrl+S` saves without closing the editor
-* Single-click preview
 * Double-click editing
+* Saving refreshes the main list and selects the saved note
+* If saving fails, the editor keeps the text for retry and reports the error
 
 ## 🔑 Password tools
 
@@ -116,10 +119,10 @@ Replace `CipherNoteVault_en.py` with one of the following files:
 
 ```text
 CipherNoteVault_en.py  English
-CipherNoteVault_zh.py  Chinese
-CipherNoteVault_ja.py  Japanese
-CipherNoteVault_ko.py  Korean
-CipherNoteVault_es.py  Spanish
+app_zh.py              Chinese
+app_ja.py              Japanese
+app_ko.py              Korean
+app_es.py              Spanish
 ```
 
 ## 📦 Build executable
@@ -143,6 +146,16 @@ py -3 -m PyInstaller -f -w CipherNoteVault_en.py
 To build another language version, replace `CipherNoteVault_en.py` with one of the other language files.
 
 Always test the generated executable on the target operating system before distribution.
+
+## 🧪 Regression checks
+
+With the dependencies installed, run:
+
+```bash
+python -B -m unittest discover -s tests -v
+```
+
+The tests use Qt's offscreen mode to check all five entry points, cross-language encrypted database compatibility, note saving and retry behavior, and implementation parity with `app_zh.py`.
 
 ## 🗃️ Database files
 

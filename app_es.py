@@ -15,7 +15,6 @@ import secrets
 import string
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,7 +23,7 @@ try:
     from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
     from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
     from PyQt6.QtCore import Qt, QTimer, QPoint
-    from PyQt6.QtGui import QAction, QFuente, QKeySequence, QShortcut
+    from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
     from PyQt6.QtWidgets import (
         QApplication,
         QAbstractItemView,
@@ -37,16 +36,18 @@ try:
         QHBoxLayout,
         QHeaderView,
         QLabel,
-        QLineEditar,
+        QLineEdit,
         QMainWindow,
         QMenu,
         QMessageBox,
         QRadioButton,
         QPushButton,
-        QPlainTextEditar,
+        QPlainTextEdit,
         QSplitter,
         QSlider,
         QSpinBox,
+        QStyle,
+        QStyledItemDelegate,
         QTabWidget,
         QTableWidget,
         QTableWidgetItem,
@@ -55,7 +56,7 @@ try:
         QWidget,
     )
 except ImportError as exc:
-    print("缺少依赖。请运行：pip install PyQt6 \"cryptography>=44.0.0\"")
+    print("Faltan dependencias. Ejecuta: pip install PyQt6 \"cryptography>=44.0.0\"")
     print(exc)
     raise
 
@@ -84,16 +85,6 @@ WINDOWS_DISPLAY_AFFINITY_EXCLUDE_FROM_CAPTURE = 0x00000011
 WINDOWS_DISPLAY_AFFINITY_MONITOR_ONLY = 0x00000001
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def readable_time(value: str) -> str:
-    if not value:
-        return ""
-    return value.replace("T", " ").replace("+00:00", " UTC")
-
-
 def b64e(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
@@ -115,9 +106,9 @@ def make_aad(kdf: Dict[str, Any], salt_b64: str) -> bytes:
 
 def derive_key(master_password: str, salt: bytes, kdf: Dict[str, Any]) -> bytes:
     if not master_password:
-        raise ValueError("The master password cannot be empty.")
+        raise ValueError("La contraseña maestra no puede estar vacía.")
     if kdf.get("name") != "Argon2id":
-        raise ValueError("Unsupported key derivation algorithm.")
+        raise ValueError("Algoritmo de derivación de claves no compatible.")
 
     return Argon2id(
         salt=salt,
@@ -135,8 +126,6 @@ def empty_payload() -> Dict[str, Any]:
         "app": APP_NAME,
         "app_version": APP_VERSION,
         "items": [],
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
     }
 
 
@@ -158,10 +147,10 @@ def password_strength_label(password: str) -> str:
         score += 1
 
     if score <= 3:
-        return "débil"
+        return "Débil"
     if score <= 5:
-        return "media"
-    return "fuerte"
+        return "Media"
+    return "Fuerte"
 
 
 class VaultError(Exception):
@@ -186,19 +175,19 @@ class Vault:
 
     def unlock(self, master_password: str) -> None:
         if not self.path.exists():
-            raise VaultError("The database file does not exist.")
+            raise VaultError("El archivo de la base de datos no existe.")
 
         try:
             outer = json.loads(self.path.read_text(encoding="utf-8"))
             if outer.get("format") != VAULT_FORMAT:
-                raise VaultError("This is not a CipherNote Vault database file.")
+                raise VaultError("Este archivo no es una base de datos de CipherNote Vault.")
             if outer.get("version") != VAULT_VERSION:
-                raise VaultError("Unsupported database version.")
+                raise VaultError("Versión de base de datos no compatible.")
             if outer.get("cipher") != "ChaCha20-Poly1305":
-                raise VaultError("Unsupported encryption algorithm.")
+                raise VaultError("Algoritmo de cifrado no compatible.")
             kdf = outer.get("kdf")
             if not isinstance(kdf, dict) or kdf.get("name") != "Argon2id":
-                raise VaultError("Invalid database KDF parameters.")
+                raise VaultError("Los parámetros KDF de la base de datos no son válidos.")
             salt_b64 = outer["salt"]
             salt = b64d(salt_b64)
             nonce = b64d(outer["nonce"])
@@ -206,7 +195,7 @@ class Vault:
         except VaultError:
             raise
         except Exception as exc:
-            raise VaultError("El archivo de base de datos está dañado o tiene un formato no válido.") from exc
+            raise VaultError("El archivo de la base de datos está dañado o tiene un formato incorrecto.") from exc
 
         key = derive_key(master_password, salt, kdf)
 
@@ -214,15 +203,15 @@ class Vault:
             aad = make_aad(kdf, salt_b64)
             plaintext = ChaCha20Poly1305(key).decrypt(nonce, ciphertext, aad)
         except InvalidTag as exc:
-            raise VaultError("Contraseña maestra incorrecta, o la base de datos fue manipulada.") from exc
+            raise VaultError("La contraseña maestra es incorrecta o el archivo de la base de datos ha sido manipulado.") from exc
 
         try:
             payload = json.loads(plaintext.decode("utf-8"))
         except Exception as exc:
-            raise VaultError("The decrypted database content is corrupted.") from exc
+            raise VaultError("El contenido descifrado de la base de datos está dañado.") from exc
 
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise VaultError("Invalid database content format.")
+            raise VaultError("El formato del contenido de la base de datos no es válido.")
 
         self.key = key
         self.salt = salt
@@ -231,10 +220,14 @@ class Vault:
 
     def save(self) -> None:
         if self.key is None or self.salt is None:
-            raise VaultError("The database is locked.")
+            raise VaultError("La base de datos está bloqueada.")
 
-        self.payload["updated_at"] = now_iso()
-        plaintext = json.dumps(self.payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        payload = {key: value for key, value in self.payload.items() if key not in ("created_at", "updated_at")}
+        payload["items"] = [
+            {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+            for item in self.payload.get("items", [])
+        ]
+        plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
         nonce = os.urandom(12)
         salt_b64 = b64e(self.salt)
@@ -255,10 +248,11 @@ class Vault:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(outer, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.path)
+        self.payload = payload
 
     def change_master_password(self, new_master_password: str) -> None:
         if self.key is None:
-            raise VaultError("The database is locked.")
+            raise VaultError("La base de datos está bloqueada.")
         self.salt = os.urandom(16)
         self.kdf = dict(ARGON2ID_PARAMS)
         self.key = derive_key(new_master_password, self.salt, self.kdf)
@@ -276,17 +270,26 @@ class Vault:
         return [item for item in items if item.get("type") == item_type]
 
     def upsert_item(self, item: Dict[str, Any]) -> None:
-        items = self.payload.setdefault("items", [])
-        item["updated_at"] = now_iso()
+        previous_payload = self.payload
+        items = list(previous_payload.get("items", []))
+        saved_item = {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+        saved_item.setdefault("id", str(uuid.uuid4()))
         for index, existing in enumerate(items):
-            if existing.get("id") == item.get("id"):
-                items[index] = item
-                self.save()
-                return
-        item.setdefault("id", str(uuid.uuid4()))
-        item.setdefault("created_at", now_iso())
-        items.append(item)
-        self.save()
+            if existing.get("id") == saved_item["id"]:
+                items[index] = saved_item
+                break
+        else:
+            items.append(saved_item)
+
+        self.payload = dict(previous_payload, items=items)
+        try:
+            self.save()
+        except Exception:
+            self.payload = previous_payload
+            raise
+        item.pop("created_at", None)
+        item.pop("updated_at", None)
+        item.update(saved_item)
 
     def delete_item(self, item_id: str) -> None:
         items = self.payload.setdefault("items", [])
@@ -303,7 +306,7 @@ class StartupDialog(QDialog):
 
         title_label = QLabel("CipherNote Vault")
         title_label.setObjectName("DialogTitle")
-        subtitle_label = QLabel("Un gestor local de contraseñas y notas seguras. Todo el contenido está protegido con Argon2id + ChaCha20-Poly1305.")
+        subtitle_label = QLabel("Gestor local de contraseñas y notas seguras. Todo el contenido de la base de datos se guarda cifrado con Argon2id + ChaCha20-Poly1305.")
         subtitle_label.setObjectName("SubtleLabel")
         subtitle_label.setWordWrap(True)
 
@@ -330,8 +333,8 @@ class StartupDialog(QDialog):
         mode_layout.addWidget(self.create_database_radio)
         mode_layout.addStretch(1)
 
-        self.path_edit = QLineEditar(str(DEFAULT_VAULT))
-        self.path_edit.setPlaceholderText("Selecciona un archivo .cnvault")
+        self.path_edit = QLineEdit(str(DEFAULT_VAULT))
+        self.path_edit.setPlaceholderText("Seleccionar un archivo de base de datos .cnvault")
         browse_button = QPushButton("Examinar")
         browse_button.clicked.connect(self.browse)
 
@@ -339,10 +342,10 @@ class StartupDialog(QDialog):
         path_layout.addWidget(self.path_edit, 1)
         path_layout.addWidget(browse_button)
 
-        self.password_edit = QLineEditar()
-        self.password_edit.setEchoMode(QLineEditar.EchoMode.Password)
-        self.confirm_edit = QLineEditar()
-        self.confirm_edit.setEchoMode(QLineEditar.EchoMode.Password)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_edit = QLineEdit()
+        self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("SubtleLabel")
@@ -380,7 +383,7 @@ class StartupDialog(QDialog):
             self.setWindowTitle("Crear nueva base de datos - CipherNote Vault")
             self.ok_button.setText("Crear base de datos")
             self.confirm_edit.setEnabled(True)
-            self.status_label.setText("Acción actual: crear una nueva base de datos con parámetros de cifrado fuertes.")
+            self.status_label.setText("Acción actual: crear una nueva base de datos local con parámetros de cifrado robustos.")
         else:
             self.mode = "open"
             self.setWindowTitle("Abrir base de datos - CipherNote Vault")
@@ -390,18 +393,18 @@ class StartupDialog(QDialog):
 
     def browse(self):
         if self.mode == "create":
-            selected_filename, _ = QFileDialog.getGuardarFileName(
+            selected_filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Create CipherNote Vault database",
+                "Crear base de datos de CipherNote Vault",
                 self.path_edit.text() or str(DEFAULT_VAULT),
-                "CipherNote Vault (*.cnvault);;JSON Files (*.json);;All Files (*)",
+                "CipherNote Vault (*.cnvault);;Archivos JSON (*.json);;Todos los archivos (*)",
             )
         else:
             selected_filename, _ = QFileDialog.getOpenFileName(
                 self,
-                "Open CipherNote Vault database",
+                "Abrir base de datos de CipherNote Vault",
                 self.path_edit.text() or str(DEFAULT_VAULT_DIR),
-                "CipherNote Vault (*.cnvault);;JSON Files (*.json);;All Files (*)",
+                "CipherNote Vault (*.cnvault);;Archivos JSON (*.json);;Todos los archivos (*)",
             )
         if selected_filename:
             self.path_edit.setText(selected_filename)
@@ -414,21 +417,18 @@ class StartupDialog(QDialog):
         master_password = self.password_edit.text()
 
         if not str(database_path).strip():
-            QMessageBox.warning(self, "Falta la ruta", "Selecciona la ruta del archivo de base de datos.")
+            QMessageBox.warning(self, "Falta la ruta", "Selecciona la ruta del archivo de la base de datos.")
             return None
         if not master_password:
             QMessageBox.warning(self, "Falta la contraseña maestra", "Introduce la contraseña maestra.")
             return None
 
         if self.mode == "create":
-            if len(master_password) < 12:
-                QMessageBox.warning(self, "La contraseña maestra es demasiado corta", "La contraseña maestra debe tener al menos 12 caracteres. Se recomienda una frase más larga.")
-                return None
             if master_password != self.confirm_edit.text():
                 QMessageBox.warning(self, "Las contraseñas no coinciden", "Las dos contraseñas maestras no coinciden.")
                 return None
             if database_path.exists():
-                answer = QMessageBox.question(self, "El archivo ya existe", "Este archivo ya existe. Continuar lo sobrescribirá. ¿Estás seguro?")
+                answer = QMessageBox.question(self, "El archivo ya existe", "Este archivo ya existe. Si continúas, se sobrescribirá. ¿Quieres continuar?")
                 if answer != QMessageBox.StandardButton.Yes:
                     return None
             return {"mode": "create", "path": database_path, "password": master_password}
@@ -442,7 +442,7 @@ class StartupDialog(QDialog):
 class PasswordGeneratorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Generar contraseña fuerte")
+        self.setWindowTitle("Generar contraseña segura")
         self.setMinimumWidth(420)
 
         self.password_length_spinbox = QSpinBox()
@@ -458,7 +458,7 @@ class PasswordGeneratorDialog(QDialog):
         self.include_symbols_checkbox.setChecked(True)
 
         form_layout = QFormLayout()
-        form_layout.addRow("Longitud:", self.password_length_spinbox)
+        form_layout.addRow("Longitud de la contraseña:", self.password_length_spinbox)
         form_layout.addRow("", self.include_alnum_checkbox)
         form_layout.addRow("", self.use_mixed_case_checkbox)
         form_layout.addRow("", self.include_symbols_checkbox)
@@ -495,12 +495,12 @@ class PasswordGeneratorDialog(QDialog):
             character_groups.append("!@#$%^&*()-_=+[]{}:,.?")
 
         if not character_groups:
-            QMessageBox.warning(self, "Faltan restricciones", "Selecciona al menos una restricción.")
+            QMessageBox.warning(self, "Faltan condiciones", "Selecciona al menos una condición para la contraseña.")
             return None
 
         password_length = self.password_length_spinbox.value()
         if password_length < len(character_groups):
-            QMessageBox.warning(self, "Length is too short", "Password length cannot be smaller than the number of selected character groups.")
+            QMessageBox.warning(self, "Longitud insuficiente", "La longitud de la contraseña no puede ser menor que el número de grupos de caracteres seleccionados.")
             return None
 
         character_pool = "".join(character_groups)
@@ -522,19 +522,19 @@ class PasswordDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
 
-        self.title_edit = QLineEditar(self.item.get("title", ""))
-        self.username_edit = QLineEditar(self.item.get("username", ""))
-        self.password_edit = QLineEditar(self.item.get("password", ""))
-        self.password_edit.setEchoMode(QLineEditar.EchoMode.Password)
-        self.notes_edit = QPlainTextEditar(self.item.get("notes", ""))
+        self.title_edit = QLineEdit(self.item.get("title", ""))
+        self.username_edit = QLineEdit(self.item.get("username", ""))
+        self.password_edit = QLineEdit(self.item.get("password", ""))
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.notes_edit = QPlainTextEdit(self.item.get("notes", ""))
 
         self.strength_label = QLabel("")
         self.strength_label.setObjectName("SubtleLabel")
-        self.password_edit.textCambiada.connect(self.update_strength)
+        self.password_edit.textChanged.connect(self.update_strength)
         self.update_strength()
 
         show_password_button = QPushButton("Mostrar/Ocultar")
-        generate_password_button = QPushButton("Generar contraseña fuerte")
+        generate_password_button = QPushButton("Generar contraseña segura")
         show_password_button.clicked.connect(self.toggle_password_visibility)
         generate_password_button.clicked.connect(self.generate_password)
 
@@ -545,7 +545,7 @@ class PasswordDialog(QDialog):
 
         form_layout = QFormLayout()
         form_layout.addRow("Título:", self.title_edit)
-        form_layout.addRow("Usuario:", self.username_edit)
+        form_layout.addRow("Nombre de usuario:", self.username_edit)
         form_layout.addRow("Contraseña:", password_row)
         form_layout.addRow("", self.strength_label)
         form_layout.addRow("Notas:", self.notes_edit)
@@ -567,22 +567,22 @@ class PasswordDialog(QDialog):
     def update_strength(self):
         password_value = self.password_edit.text()
         self.strength_label.setText(
-            "Seguridad: vacía"
+            "Seguridad de la contraseña: vacía"
             if not password_value
-            else f"Seguridad: {password_strength_label(password_value)}"
+            else f"Seguridad de la contraseña: {password_strength_label(password_value)}"
         )
 
     def toggle_password_visibility(self):
-        if self.password_edit.echoMode() == QLineEditar.EchoMode.Contraseña:
-            self.password_edit.setEchoMode(QLineEditar.EchoMode.Normal)
+        if self.password_edit.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
         else:
-            self.password_edit.setEchoMode(QLineEditar.EchoMode.Password)
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
     def generate_password(self):
         generated_password = PasswordGeneratorDialog(parent=self).generate()
         if generated_password:
             self.password_edit.setText(generated_password)
-            self.password_edit.setEchoMode(QLineEditar.EchoMode.Normal)
+            self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
 
     def get_item(self) -> Optional[Dict[str, Any]]:
         if self.exec() != QDialog.DialogCode.Accepted:
@@ -600,8 +600,6 @@ class PasswordDialog(QDialog):
             "username": self.username_edit.text().strip(),
             "password": self.password_edit.text(),
             "notes": self.notes_edit.toPlainText(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
 
@@ -620,28 +618,28 @@ class NoteDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
 
-        self.title_edit = QLineEditar(self.item.get("title", ""))
+        self.title_edit = QLineEdit(self.item.get("title", ""))
         self.title_edit.setPlaceholderText("Título de la nota")
-        self.content_edit = QPlainTextEditar(self.item.get("content", ""))
-        self.content_edit.setObjectName("NoteContentEditaror")
-        self.content_edit.setPlaceholderText("Escribe aquí tus notas importantes...")
+        self.content_edit = QPlainTextEdit(self.item.get("content", ""))
+        self.content_edit.setObjectName("NoteContentEditor")
+        self.content_edit.setPlaceholderText("Escribe aquí tus notas importantes…")
 
         self.note_font_slider = QSlider(Qt.Orientation.Horizontal)
         self.note_font_slider.setRange(12, 36)
         self.note_font_slider.setValue(int(self.item.get("font_size", 18) or 18))
         self.note_font_slider.setFixedWidth(180)
-        self.note_font_slider.valueCambiada.connect(self.apply_note_font_size)
+        self.note_font_slider.valueChanged.connect(self.apply_note_font_size)
 
         self.note_font_size_label = QLabel(f"Fuente {self.note_font_slider.value()}")
         self.note_font_size_label.setObjectName("SubtleLabel")
-        self.save_status_label = QLabel("Ctrl+S guarda sin cerrar")
+        self.save_status_label = QLabel("Ctrl+S guarda sin cerrar la ventana")
         self.save_status_label.setObjectName("SubtleLabel")
 
         title_layout = QHBoxLayout()
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(8)
-        title_label = QLabel("Title")
-        title_label.setObjectName("BuscarLabel")
+        title_label = QLabel("Título")
+        title_label.setObjectName("SearchLabel")
         title_label.setFixedWidth(44)
         title_layout.addWidget(title_label)
         title_layout.addWidget(self.title_edit, 1)
@@ -651,7 +649,7 @@ class NoteDialog(QDialog):
         save_button.clicked.connect(self.save_without_closing)
         close_button.clicked.connect(self.close)
 
-        save_shortcut = QShortcut(QKeySequence.StandardKey.Guardar, self)
+        save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
         save_shortcut.activated.connect(self.save_without_closing)
 
         bottom_layout = QHBoxLayout()
@@ -676,9 +674,9 @@ class NoteDialog(QDialog):
         self.apply_note_font_size()
 
     def apply_note_font_size(self):
-        note_font = QFuente("Microsoft YaHei")
+        note_font = QFont("Microsoft YaHei")
         note_font.setPointSize(self.note_font_slider.value())
-        self.content_edit.setFuente(note_font)
+        self.content_edit.setFont(note_font)
         self.note_font_size_label.setText(f"Fuente {self.note_font_slider.value()}")
 
     def build_note_item(self) -> Optional[Dict[str, Any]]:
@@ -693,8 +691,6 @@ class NoteDialog(QDialog):
             "title": note_title,
             "content": self.content_edit.toPlainText(),
             "font_size": self.note_font_slider.value(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
     def save_without_closing(self):
@@ -702,11 +698,17 @@ class NoteDialog(QDialog):
         if note_item is None:
             return
 
-        self.item = note_item
-        if self.on_save is not None:
+        try:
+            if self.on_save is None:
+                raise VaultError("La función de guardado no está conectada a la base de datos. La nota no se ha guardado.")
             self.on_save(note_item)
+        except Exception as exc:
+            self.save_status_label.setText("No se pudo guardar. El contenido sigue en el editor. Vuelve a intentarlo.")
+            QMessageBox.critical(self, "Error al guardar", str(exc))
+            return
 
-        self.save_status_label.setText(f"Guardado: {readable_time(note_item.get('updated_at', ''))}")
+        self.item = note_item
+        self.save_status_label.setText("Guardado")
 
     def get_item(self) -> Optional[Dict[str, Any]]:
         if self.exec() != QDialog.DialogCode.Accepted:
@@ -720,12 +722,12 @@ class MasterPasswordDialog(QDialog):
         self.setWindowTitle("Cambiar contraseña maestra")
         self.setMinimumWidth(520)
 
-        self.password_edit = QLineEditar()
-        self.password_edit.setEchoMode(QLineEditar.EchoMode.Password)
-        self.confirm_edit = QLineEditar()
-        self.confirm_edit.setEchoMode(QLineEditar.EchoMode.Password)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_edit = QLineEdit()
+        self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
-        hint = QLabel("Changing the master password regenerates the salt and re-encrypts the database using a new Argon2id-derived key.")
+        hint = QLabel("Al cambiar la contraseña maestra se genera una nueva sal y se vuelve a cifrar la base de datos con una nueva clave derivada mediante Argon2id.")
         hint.setObjectName("SubtleLabel")
         hint.setWordWrap(True)
 
@@ -753,25 +755,25 @@ class MasterPasswordDialog(QDialog):
             return None
 
         password = self.password_edit.text()
-        if len(password) < 12:
-            QMessageBox.warning(self, "La contraseña maestra es demasiado corta", "The master password should be at least 12 characters.")
-            return None
         if password != self.confirm_edit.text():
             QMessageBox.warning(self, "Las contraseñas no coinciden", "Las dos contraseñas maestras no coinciden.")
             return None
         return password
 
 
+class NoFocusItemDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+
+
 class DetailCard(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("Card")
-        self.title = QLabel("Selecciona un elemento")
+        self.title = QLabel("Selecciona una entrada")
         self.title.setObjectName("CardTitle")
         self.title.setWordWrap(True)
-        self.meta = QLabel("")
-        self.meta.setObjectName("SubtleLabel")
-        self.meta.setWordWrap(True)
         self.body = QLabel("")
         self.body.setObjectName("BodyLabel")
         self.body.setWordWrap(True)
@@ -779,37 +781,22 @@ class DetailCard(QFrame):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title)
-        layout.addWidget(self.meta)
         layout.addSpacing(10)
         layout.addWidget(self.body, 1)
 
     def show_password_item(self, item: Optional[Dict[str, Any]]):
         if not item:
-            self.title.setText("请选择一条密码记录")
-            self.meta.setText("")
-            self.body.setText("左侧列表支持搜索；双击记录可以Editar。")
+            self.title.setText("Selecciona una entrada de contraseña")
+            self.body.setText("Puedes buscar en la lista de la izquierda y hacer doble clic en una entrada para editarla.")
             return
 
         masked = "•" * min(max(len(item.get("password", "")), 8), 24)
         self.title.setText(item.get("title", ""))
-        self.meta.setText(f"Actualizado: {readable_time(item.get('updated_at', ''))}")
         self.body.setText(
-            f"Usuario:{item.get('username', '')}\n"
+            f"Nombre de usuario:{item.get('username', '')}\n"
             f"Contraseña:{masked}\n\n"
             f"Notas:\n{item.get('notes', '')}"
         )
-
-    def show_note_item(self, item: Optional[Dict[str, Any]]):
-        if not item:
-            self.title.setText("请选择一条Seguridad笔记")
-            self.meta.setText("")
-            self.body.setText("左侧列表支持搜索；双击记录可以打开Editar。")
-            return
-
-        self.title.setText(item.get("title", ""))
-        self.meta.setText(f"Actualizado: {readable_time(item.get('updated_at', ''))}")
-        self.body.setText(item.get("content", ""))
-
 
 class MainWindow(QMainWindow):
     def __init__(self, vault: Vault):
@@ -823,20 +810,19 @@ class MainWindow(QMainWindow):
         self.note_items_all: List[Dict[str, Any]] = []
         self.note_items_view: List[Dict[str, Any]] = []
 
-        self.search_edit = QLineEditar()
-        self.search_edit.setPlaceholderText("Buscar títulos, usuarios, notas y contenido")
-        self.search_edit.textCambiada.connect(self.apply_filter)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Buscar títulos, nombres de usuario, notas y contenido")
+        self.search_edit.textChanged.connect(self.apply_filter)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.password_table = self.make_table(["Title", "Usuario", "Notas", "Actualizado"])
-        self.note_table = self.make_table(["Title", "Actualizado"])
+        self.password_table = self.make_table(["Título", "Nombre de usuario", "Notas"])
+        self.password_table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 8px; }")
+        self.note_table = self.make_table(["Título"])
+        self.note_table.horizontalHeader().hide()
         self.password_detail = DetailCard()
-        self.note_detail = DetailCard()
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.note_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.tabs.addTab(self.make_password_tab(), "Gestor de contraseñas")
         self.tabs.addTab(self.make_note_tab(), "Notas seguras")
@@ -855,7 +841,7 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(10, 8, 10, 8)
         top_layout.setSpacing(8)
         search_label = QLabel("Buscar")
-        search_label.setObjectName("BuscarLabel")
+        search_label.setObjectName("SearchLabel")
         search_label.setMinimumWidth(86)
         search_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_layout.addWidget(search_label)
@@ -869,7 +855,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main)
 
         self.password_table.itemClicked.connect(self.show_clicked_password_detail)
-        self.note_table.itemClicked.connect(self.show_clicked_note_detail)
         self.password_table.doubleClicked.connect(self.edit_password)
         self.note_table.doubleClicked.connect(self.edit_note)
 
@@ -927,10 +912,11 @@ class MainWindow(QMainWindow):
 
     def make_table(self, headers: List[str]) -> QTableWidget:
         table = QTableWidget(0, len(headers))
+        table.setItemDelegate(NoFocusItemDelegate(table))
         table.setHorizontalHeaderLabels(headers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        table.setEditarTriggers(QAbstractItemView.EditarTrigger.NoEditarTriggers)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setStretchLastSection(True)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -954,10 +940,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-        self.note_splitter.addWidget(self.note_table)
-        self.note_splitter.addWidget(self.note_detail)
-        self.note_splitter.setSizes([1240, 0])
-        layout.addWidget(self.note_splitter, 1)
+        layout.addWidget(self.note_table, 1)
         return page
 
     def setup_context_menus(self):
@@ -979,7 +962,7 @@ class MainWindow(QMainWindow):
         edit_action = menu.addAction("Editar")
         delete_action = menu.addAction("Eliminar")
         menu.addSeparator()
-        copy_user_action = menu.addAction("Copiar usuario")
+        copy_user_action = menu.addAction("Copiar nombre de usuario")
         copy_pass_action = menu.addAction("Copiar contraseña")
 
         action = menu.exec(self.password_table.viewport().mapToGlobal(pos))
@@ -1006,7 +989,7 @@ class MainWindow(QMainWindow):
 
         self.note_table.selectRow(item.row())
         add_action = menu.addAction("Añadir nota")
-        edit_action = menu.addAction("Abrir/Editarar")
+        edit_action = menu.addAction("Abrir/Editar")
         delete_action = menu.addAction("Eliminar")
 
         action = menu.exec(self.note_table.viewport().mapToGlobal(pos))
@@ -1026,19 +1009,17 @@ class MainWindow(QMainWindow):
             self.vault.all_items("note"),
             key=self.note_sort_key,
         )
-        self.status_label.setText(f"Passwords {len(self.password_items_all)} · Notas {len(self.note_items_all)} · Cifrado fuerte")
+        self.status_label.setText(f"Contraseñas {len(self.password_items_all)} · Notas {len(self.note_items_all)} · Cifrado robusto")
         self.apply_filter()
 
     def password_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
         username_value = str(item.get("username", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, username_value, updated_value)
+        return (title_value, username_value)
 
     def note_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, updated_value)
+        return title_value
 
     def apply_filter(self):
         keyword = self.search_edit.text().strip().lower()
@@ -1056,16 +1037,14 @@ class MainWindow(QMainWindow):
 
     def hide_details(self):
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter.setSizes([1240, 0])
-        self.note_splitter.setSizes([1240, 0])
 
     def refresh_password_table(self):
         self.password_table.setRowCount(0)
         for item in self.password_items_view:
             row = self.password_table.rowCount()
             self.password_table.insertRow(row)
-            values = [item.get("title", ""), item.get("username", ""), item.get("notes", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", ""), item.get("username", ""), item.get("notes", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1076,7 +1055,7 @@ class MainWindow(QMainWindow):
         for item in self.note_items_view:
             row = self.note_table.rowCount()
             self.note_table.insertRow(row)
-            values = [item.get("title", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1101,23 +1080,16 @@ class MainWindow(QMainWindow):
             self.password_detail.show()
             self.password_splitter.setSizes([820, 390])
 
-    def show_clicked_note_detail(self, *_args):
-        item = self.selected_note()
-        if item:
-            self.note_detail.show_note_item(item)
-            self.note_detail.show()
-            self.note_splitter.setSizes([820, 390])
-
     def require_password_selection(self) -> Optional[Dict[str, Any]]:
         item = self.selected_password()
         if item is None:
-            QMessageBox.information(self, "Selecciona un elemento", "Selecciona primero una entrada de contraseña.")
+            QMessageBox.information(self, "Selecciona una entrada", "Selecciona primero una entrada de contraseña.")
         return item
 
     def require_note_selection(self) -> Optional[Dict[str, Any]]:
         item = self.selected_note()
         if item is None:
-            QMessageBox.information(self, "Selecciona un elemento", "Selecciona primero una nota.")
+            QMessageBox.information(self, "Selecciona una entrada", "Selecciona primero una nota.")
         return item
 
     def add_password(self):
@@ -1139,7 +1111,7 @@ class MainWindow(QMainWindow):
         item = self.require_password_selection()
         if not item:
             return
-        answer = QMessageBox.question(self, "Confirmar eliminación", f"Eliminar “{item.get('title', '')}”?")
+        answer = QMessageBox.question(self, "Confirmar eliminación", f"¿Eliminar «{item.get('title', '')}»?")
         if answer == QMessageBox.StandardButton.Yes:
             self.vault.delete_item(item["id"])
             self.refresh_all()
@@ -1147,12 +1119,12 @@ class MainWindow(QMainWindow):
     def copy_username(self):
         item = self.require_password_selection()
         if item:
-            self.copy_to_clipboard(item.get("username", ""), "Usuario copiado.")
+            self.copy_to_clipboard(item.get("username", ""), "Nombre de usuario copiado.")
 
     def copy_password(self):
         item = self.require_password_selection()
         if item:
-            self.copy_to_clipboard(item.get("password", ""), "Contraseña copiada. El portapapeles se borrará después de 30 segundos.", auto_clear=True)
+            self.copy_to_clipboard(item.get("password", ""), "Contraseña copiada. El portapapeles se vaciará automáticamente después de 30 segundos.", auto_clear=True)
 
     def copy_to_clipboard(self, text: str, message: str, auto_clear: bool = False):
         QApplication.clipboard().setText(text)
@@ -1164,25 +1136,29 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(30_000, clear_clipboard)
 
     def add_note(self):
-        item = NoteDialog(parent=self).get_item()
-        if item:
-            self.vault.upsert_item(item)
-            self.refresh_all()
+        NoteDialog(parent=self, on_save=self.save_note).exec()
+
+    def save_note(self, item: Dict[str, Any]) -> None:
+        self.vault.upsert_item(item)
+        self.refresh_all()
+        if not any(note.get("id") == item["id"] for note in self.note_items_view):
+            self.search_edit.clear()
+        for row, note in enumerate(self.note_items_view):
+            if note.get("id") == item["id"]:
+                self.note_table.selectRow(row)
+                break
 
     def edit_note(self, *_args):
         item = self.require_note_selection()
         if not item:
             return
-        updated = NoteDialog(item=item, parent=self).get_item()
-        if updated:
-            self.vault.upsert_item(updated)
-            self.refresh_all()
+        NoteDialog(item=item, parent=self, on_save=self.save_note).exec()
 
     def delete_note(self):
         item = self.require_note_selection()
         if not item:
             return
-        answer = QMessageBox.question(self, "Confirmar eliminación", f"Eliminar “{item.get('title', '')}”?")
+        answer = QMessageBox.question(self, "Confirmar eliminación", f"¿Eliminar «{item.get('title', '')}»?")
         if answer == QMessageBox.StandardButton.Yes:
             self.vault.delete_item(item["id"])
             self.refresh_all()
@@ -1190,18 +1166,18 @@ class MainWindow(QMainWindow):
     def force_save(self):
         try:
             self.vault.save()
-            QMessageBox.information(self, "Guardard", "Base de datos guardada.")
+            QMessageBox.information(self, "Guardado", "Base de datos guardada.")
         except Exception as exc:
-            QMessageBox.critical(self, "Guardar failed", str(exc))
+            QMessageBox.critical(self, "Error al guardar", str(exc))
 
     def change_master_password(self):
         new_password = MasterPasswordDialog(parent=self).get_password()
         if new_password:
             try:
                 self.vault.change_master_password(new_password)
-                QMessageBox.information(self, "Cambiada", "The master password has been changed and the database has been re-encrypted with the new key.")
+                QMessageBox.information(self, "Modificado", "Se ha cambiado la contraseña maestra y se ha guardado la base de datos cifrada de nuevo con la nueva clave.")
             except Exception as exc:
-                QMessageBox.critical(self, "Cambiar failed", str(exc))
+                QMessageBox.critical(self, "Error al cambiar", str(exc))
 
     def lock_and_exit(self):
         self.vault.lock()
@@ -1220,33 +1196,33 @@ class MainWindow(QMainWindow):
 
     def show_database_info(self):
         message = (
-            f"Application: {APP_NAME} {APP_VERSION}\n"
-            f"File: {self.vault.path}\n"
-            f"Algorithm: Argon2id + ChaCha20-Poly1305\n"
-            f"Argon2id：iterations={self.vault.kdf.get('iterations')}，lanes={self.vault.kdf.get('lanes')}，memory={self.vault.kdf.get('memory_cost')} KiB\n"
-            f"Password entries: {len(self.password_items_all)}\n"
+            f"Aplicación: {APP_NAME} {APP_VERSION}\n"
+            f"Archivo: {self.vault.path}\n"
+            f"Algoritmo: Argon2id + ChaCha20-Poly1305\n"
+            f"Argon2id: iteraciones={self.vault.kdf.get('iterations')}, carriles={self.vault.kdf.get('lanes')}, memoria={self.vault.kdf.get('memory_cost')} KiB\n"
+            f"Entradas de contraseñas: {len(self.password_items_all)}\n"
             f"Notas seguras: {len(self.note_items_all)}"
         )
-        QMessageBox.information(self, "Informaciónrmación de la base de datos", message)
+        QMessageBox.information(self, "Información de la base de datos", message)
 
     def show_donation(self):
         message = (
-            f"Si este proyecto te resulta útil, puedes apoyar al autor.\n\n"
-            f"Bitcoin：{DONATION_BTC}\n"
-            f"Ethereum：{DONATION_ETH}\n"
-            f"BNB Smart Chain：{DONATION_BNB}"
+            f"Si este proyecto te resulta útil, puedes apoyar a su autor.\n\n"
+            f"Bitcoin: {DONATION_BTC}\n"
+            f"Ethereum: {DONATION_ETH}\n"
+            f"BNB Smart Chain: {DONATION_BNB}"
         )
         QMessageBox.information(self, "Apoyar al autor", message)
 
     def show_security_notes(self):
         message = (
-            "CipherNote Vault uses Argon2id to derive a 256-bit key from the master password and uses ChaCha20-Poly1305 to authenticated-encrypt the entire database.\n\n"
-            "Password entries and secure notes are stored in the same encrypted payload. The database file only stores the salt, nonce, KDF parameters, and ciphertext.\n\n"
-            "Saving uses a temporary file and atomic replacement to reduce the risk of corruption caused by interrupted writes.\n\n"
-            "On Windows, the program attempts to enable SetWindowDisplayAffinity to reduce ordinary screenshot and screen-recording capture.\n\n"
-            "Seguridad boundary: this program cannot defend against malware that already controls the machine, phone photography, administrator-level screen capture, keyloggers, clipboard monitoring, or memory dumps. Full-disk encryption is recommended."
+            "CipherNote Vault utiliza Argon2id para derivar una clave de 256 bits a partir de la contraseña maestra y ChaCha20-Poly1305 para cifrar y autenticar toda la base de datos.\n\n"
+            "Las contraseñas y las notas seguras se almacenan en el mismo contenido cifrado. El archivo de la base de datos solo guarda la sal, el nonce, los parámetros KDF y el texto cifrado.\n\n"
+            "Al guardar se utiliza un archivo temporal y una sustitución atómica para reducir el riesgo de daños por interrupciones de escritura.\n\n"
+            "En Windows, la aplicación intenta activar SetWindowDisplayAffinity para reducir la captura mediante herramientas habituales de capturas de pantalla y grabación.\n\n"
+            "Límites de seguridad: esta aplicación no protege frente a malware que ya controle el equipo, fotografías con el móvil, capturas con privilegios de administrador, registro de pulsaciones, vigilancia del portapapeles ni volcados de memoria. Se recomienda utilizar cifrado de disco completo."
         )
-        QMessageBox.information(self, "Notas de seguridad", message)
+        QMessageBox.information(self, "Información de seguridad", message)
 
 
 def set_app_style(app: QApplication):
@@ -1260,7 +1236,7 @@ def set_app_style(app: QApplication):
         QMainWindow, QDialog {
             background-color: #8A1F00;
         }
-        QLineEditar, QPlainTextEditar, QTableWidget {
+        QLineEdit, QPlainTextEdit, QTableWidget {
             background-color: #6F1A00;
             color: #FFF700;
             border: 1px solid #C86F00;
@@ -1269,7 +1245,7 @@ def set_app_style(app: QApplication):
             selection-background-color: #B45300;
             selection-color: #FFF700;
         }
-        QPlainTextEditar { line-height: 1.5em; }
+        QPlainTextEdit { line-height: 1.5em; }
         QTableWidget {
             gridline-color: #9A3400;
             alternate-background-color: #7C1D00;
@@ -1398,7 +1374,7 @@ def set_app_style(app: QApplication):
             border-radius: 10px;
             padding: 12px;
         }
-        QLabel#BuscarLabel {
+        QLabel#SearchLabel {
             font-weight: 800;
             color: #FDE600;
         }
@@ -1433,7 +1409,7 @@ def bootstrap_vault(parent=None) -> Optional[Vault]:
                 vault.unlock(result["password"])
             return vault
         except Exception as exc:
-            QMessageBox.critical(parent, "数据库打开失败", str(exc))
+            QMessageBox.critical(parent, "No se pudo abrir la base de datos", str(exc))
 
     return None
 
