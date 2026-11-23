@@ -13,12 +13,6 @@ The application supports adding, editing, deleting, searching, importing, and ex
 It also uses SQLite FTS5 for full-text search, and uses worker threads for operations such as loading, searching, importing, and exporting so the interface remains responsive when handling larger data sets.
 When importing files, the file name is used as the title and the file content is saved as the body; when exporting records, each selected record is written as a separate file.
 This script is released under the AGPL-3.0-only license.
-If sqlite_text_code_manager_pyqt6.py is helpful to you, you are welcome to sponsor or support its continued development through the following addresses: 
-Bitcoin: bc1qwhzzk5tx07592vkf97rt8x8v0zdntad8lexnrgv3gdmecg8pfmhqzceedl
-Ethereum: 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
-SOL: B7N4e3KG9zWQBwMrtydS1B9wVBp2w62fAdryZdxAMBiz
-USDT(BNB Smart Chain): 0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b.
-Thank you for your support.
 """
 
 

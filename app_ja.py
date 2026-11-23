@@ -18,47 +18,42 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-try:
-    from cryptography.exceptions import InvalidTag
-    from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-    from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-    from PyQt6.QtCore import Qt, QTimer, QPoint
-    from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
-    from PyQt6.QtWidgets import (
-        QApplication,
-        QAbstractItemView,
-        QButtonGroup,
-        QCheckBox,
-        QDialog,
-        QFileDialog,
-        QFormLayout,
-        QFrame,
-        QHBoxLayout,
-        QHeaderView,
-        QLabel,
-        QLineEdit,
-        QMainWindow,
-        QMenu,
-        QMessageBox,
-        QRadioButton,
-        QPushButton,
-        QPlainTextEdit,
-        QSplitter,
-        QSlider,
-        QSpinBox,
-        QStyle,
-        QStyledItemDelegate,
-        QTabWidget,
-        QTableWidget,
-        QTableWidgetItem,
-        QToolBar,
-        QVBoxLayout,
-        QWidget,
-    )
-except ImportError as exc:
-    print("依存パッケージが不足しています。次を実行してください：pip install PyQt6 \"cryptography>=44.0.0\"")
-    print(exc)
-    raise
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
+    QButtonGroup,
+    QCheckBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QRadioButton,
+    QPushButton,
+    QPlainTextEdit,
+    QSplitter,
+    QSlider,
+    QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 APP_NAME = "CipherNote Vault"
@@ -76,9 +71,6 @@ ARGON2ID_PARAMS = {
     "memory_cost": 256 * 1024,
 }
 
-DONATION_BTC = "bc1qwhzzk5tx07592vkf97rt8x8v0zdntad8lexnrgv3gdmecg8pfmhqzceedl"
-DONATION_ETH = "0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b"
-DONATION_BNB = "0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b"
 
 WINDOWS_DISPLAY_AFFINITY_NONE = 0x00000000
 WINDOWS_DISPLAY_AFFINITY_EXCLUDE_FROM_CAPTURE = 0x00000011
@@ -902,9 +894,6 @@ class MainWindow(QMainWindow):
         info_action.triggered.connect(self.show_database_info)
         toolbar.addAction(info_action)
 
-        donate_action = QAction("支援", self)
-        donate_action.triggered.connect(self.show_donation)
-        toolbar.addAction(donate_action)
 
         security_action = QAction("セキュリティ", self)
         security_action.triggered.connect(self.show_security_notes)
@@ -1204,15 +1193,6 @@ class MainWindow(QMainWindow):
             f"セキュアノート：{len(self.note_items_all)}"
         )
         QMessageBox.information(self, "データベース情報", message)
-
-    def show_donation(self):
-        message = (
-            f"このプロジェクトが役に立ったら、作者をご支援いただけます。\n\n"
-            f"Bitcoin：{DONATION_BTC}\n"
-            f"Ethereum：{DONATION_ETH}\n"
-            f"BNB Smart Chain：{DONATION_BNB}"
-        )
-        QMessageBox.information(self, "作者を支援", message)
 
     def show_security_notes(self):
         message = (

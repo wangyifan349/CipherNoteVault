@@ -203,32 +203,6 @@ Consider maintaining multiple copies of important files in different locations. 
 
 ❤️ A backup only becomes valuable when it is available after something goes wrong. Please make sure both your `.cnvault` database file and your master password are stored safely and can be recovered when needed.
 
-## ❤️ Sponsorship
-
-If CipherNote Vault is useful to you, sponsorship is welcome and greatly appreciated.
-
-Your support helps encourage continued development, maintenance, and improvement of the project.
-
-### ₿ Bitcoin
-
-```text
-bc1qwhzzk5tx07592vkf97rt8x8v0zdntad8lexnrgv3gdmecg8pfmhqzceedl
-```
-
-### Ξ Ethereum
-
-```text
-0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
-```
-
-### ◈ BNB Smart Chain (BEP20)
-
-```text
-0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b
-```
-
-❤️ Thank you for supporting open-source software.
-
 ## 📄 License
 
 🔓 **CipherNote Vault** and all files contained in this repository are licensed under the **GNU Affero General Public License v3.0 only (AGPL-3.0-only)**, unless explicitly stated otherwise.

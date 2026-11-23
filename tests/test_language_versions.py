@@ -239,8 +239,7 @@ class LanguageVersionsTest(unittest.TestCase):
                 with patch.object(module.QMessageBox, "information") as message:
                     window.show_database_info()
                     window.show_security_notes()
-                    window.show_donation()
-                    self.assertEqual(message.call_count, 3)
+                    self.assertEqual(message.call_count, 2)
 
                 vault.upsert_item({"id": "password", "type": "password", "title": "Account",
                                    "username": "user", "password": "secret", "notes": "Memo"})
