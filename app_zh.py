@@ -15,7 +15,6 @@ import secrets
 import string
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -47,6 +46,8 @@ try:
         QSplitter,
         QSlider,
         QSpinBox,
+        QStyle,
+        QStyledItemDelegate,
         QTabWidget,
         QTableWidget,
         QTableWidgetItem,
@@ -82,16 +83,6 @@ DONATION_BNB = "0x2d92f9e4d8ac7effa9cd7cd5eccd364cac7c201b"
 WINDOWS_DISPLAY_AFFINITY_NONE = 0x00000000
 WINDOWS_DISPLAY_AFFINITY_EXCLUDE_FROM_CAPTURE = 0x00000011
 WINDOWS_DISPLAY_AFFINITY_MONITOR_ONLY = 0x00000001
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def readable_time(value: str) -> str:
-    if not value:
-        return ""
-    return value.replace("T", " ").replace("+00:00", " UTC")
 
 
 def b64e(data: bytes) -> str:
@@ -135,8 +126,6 @@ def empty_payload() -> Dict[str, Any]:
         "app": APP_NAME,
         "app_version": APP_VERSION,
         "items": [],
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
     }
 
 
@@ -233,8 +222,12 @@ class Vault:
         if self.key is None or self.salt is None:
             raise VaultError("数据库处于锁定状态。")
 
-        self.payload["updated_at"] = now_iso()
-        plaintext = json.dumps(self.payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        payload = {key: value for key, value in self.payload.items() if key not in ("created_at", "updated_at")}
+        payload["items"] = [
+            {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+            for item in self.payload.get("items", [])
+        ]
+        plaintext = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
         nonce = os.urandom(12)
         salt_b64 = b64e(self.salt)
@@ -255,6 +248,7 @@ class Vault:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(outer, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.path)
+        self.payload = payload
 
     def change_master_password(self, new_master_password: str) -> None:
         if self.key is None:
@@ -276,17 +270,26 @@ class Vault:
         return [item for item in items if item.get("type") == item_type]
 
     def upsert_item(self, item: Dict[str, Any]) -> None:
-        items = self.payload.setdefault("items", [])
-        item["updated_at"] = now_iso()
+        previous_payload = self.payload
+        items = list(previous_payload.get("items", []))
+        saved_item = {key: value for key, value in item.items() if key not in ("created_at", "updated_at")}
+        saved_item.setdefault("id", str(uuid.uuid4()))
         for index, existing in enumerate(items):
-            if existing.get("id") == item.get("id"):
-                items[index] = item
-                self.save()
-                return
-        item.setdefault("id", str(uuid.uuid4()))
-        item.setdefault("created_at", now_iso())
-        items.append(item)
-        self.save()
+            if existing.get("id") == saved_item["id"]:
+                items[index] = saved_item
+                break
+        else:
+            items.append(saved_item)
+
+        self.payload = dict(previous_payload, items=items)
+        try:
+            self.save()
+        except Exception:
+            self.payload = previous_payload
+            raise
+        item.pop("created_at", None)
+        item.pop("updated_at", None)
+        item.update(saved_item)
 
     def delete_item(self, item_id: str) -> None:
         items = self.payload.setdefault("items", [])
@@ -421,9 +424,6 @@ class StartupDialog(QDialog):
             return None
 
         if self.mode == "create":
-            if len(master_password) < 12:
-                QMessageBox.warning(self, "主密码太短", "主密码建议至少 12 个字符，最好使用更长的密码短语。")
-                return None
             if master_password != self.confirm_edit.text():
                 QMessageBox.warning(self, "密码不一致", "两次输入的主密码不一致。")
                 return None
@@ -600,8 +600,6 @@ class PasswordDialog(QDialog):
             "username": self.username_edit.text().strip(),
             "password": self.password_edit.text(),
             "notes": self.notes_edit.toPlainText(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
 
@@ -693,8 +691,6 @@ class NoteDialog(QDialog):
             "title": note_title,
             "content": self.content_edit.toPlainText(),
             "font_size": self.note_font_slider.value(),
-            "created_at": self.item.get("created_at", now_iso()),
-            "updated_at": now_iso(),
         }
 
     def save_without_closing(self):
@@ -702,11 +698,17 @@ class NoteDialog(QDialog):
         if note_item is None:
             return
 
-        self.item = note_item
-        if self.on_save is not None:
+        try:
+            if self.on_save is None:
+                raise VaultError("未连接数据库保存功能，笔记尚未保存。")
             self.on_save(note_item)
+        except Exception as exc:
+            self.save_status_label.setText("保存失败，内容仍保留在编辑器中，请重试")
+            QMessageBox.critical(self, "保存失败", str(exc))
+            return
 
-        self.save_status_label.setText(f"已保存：{readable_time(note_item.get('updated_at', ''))}")
+        self.item = note_item
+        self.save_status_label.setText("已保存")
 
     def get_item(self) -> Optional[Dict[str, Any]]:
         if self.exec() != QDialog.DialogCode.Accepted:
@@ -753,13 +755,16 @@ class MasterPasswordDialog(QDialog):
             return None
 
         password = self.password_edit.text()
-        if len(password) < 12:
-            QMessageBox.warning(self, "主密码太短", "主密码建议至少 12 个字符。")
-            return None
         if password != self.confirm_edit.text():
             QMessageBox.warning(self, "密码不一致", "两次输入的主密码不一致。")
             return None
         return password
+
+
+class NoFocusItemDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
 
 
 class DetailCard(QFrame):
@@ -769,9 +774,6 @@ class DetailCard(QFrame):
         self.title = QLabel("请选择一条记录")
         self.title.setObjectName("CardTitle")
         self.title.setWordWrap(True)
-        self.meta = QLabel("")
-        self.meta.setObjectName("SubtleLabel")
-        self.meta.setWordWrap(True)
         self.body = QLabel("")
         self.body.setObjectName("BodyLabel")
         self.body.setWordWrap(True)
@@ -779,37 +781,22 @@ class DetailCard(QFrame):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title)
-        layout.addWidget(self.meta)
         layout.addSpacing(10)
         layout.addWidget(self.body, 1)
 
     def show_password_item(self, item: Optional[Dict[str, Any]]):
         if not item:
             self.title.setText("请选择一条密码记录")
-            self.meta.setText("")
             self.body.setText("左侧列表支持搜索；双击记录可以编辑。")
             return
 
         masked = "•" * min(max(len(item.get("password", "")), 8), 24)
         self.title.setText(item.get("title", ""))
-        self.meta.setText(f"更新时间：{readable_time(item.get('updated_at', ''))}")
         self.body.setText(
             f"用户名：{item.get('username', '')}\n"
             f"密码：{masked}\n\n"
             f"备注：\n{item.get('notes', '')}"
         )
-
-    def show_note_item(self, item: Optional[Dict[str, Any]]):
-        if not item:
-            self.title.setText("请选择一条安全笔记")
-            self.meta.setText("")
-            self.body.setText("左侧列表支持搜索；双击记录可以打开编辑。")
-            return
-
-        self.title.setText(item.get("title", ""))
-        self.meta.setText(f"更新时间：{readable_time(item.get('updated_at', ''))}")
-        self.body.setText(item.get("content", ""))
-
 
 class MainWindow(QMainWindow):
     def __init__(self, vault: Vault):
@@ -829,14 +816,13 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.password_table = self.make_table(["标题", "用户名", "备注", "更新时间"])
-        self.note_table = self.make_table(["标题", "更新时间"])
+        self.password_table = self.make_table(["标题", "用户名", "备注"])
+        self.password_table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 8px; }")
+        self.note_table = self.make_table(["标题"])
+        self.note_table.horizontalHeader().hide()
         self.password_detail = DetailCard()
-        self.note_detail = DetailCard()
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.note_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.tabs.addTab(self.make_password_tab(), "密码管理器")
         self.tabs.addTab(self.make_note_tab(), "安全记事本")
@@ -869,7 +855,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main)
 
         self.password_table.itemClicked.connect(self.show_clicked_password_detail)
-        self.note_table.itemClicked.connect(self.show_clicked_note_detail)
         self.password_table.doubleClicked.connect(self.edit_password)
         self.note_table.doubleClicked.connect(self.edit_note)
 
@@ -927,6 +912,7 @@ class MainWindow(QMainWindow):
 
     def make_table(self, headers: List[str]) -> QTableWidget:
         table = QTableWidget(0, len(headers))
+        table.setItemDelegate(NoFocusItemDelegate(table))
         table.setHorizontalHeaderLabels(headers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -954,10 +940,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-        self.note_splitter.addWidget(self.note_table)
-        self.note_splitter.addWidget(self.note_detail)
-        self.note_splitter.setSizes([1240, 0])
-        layout.addWidget(self.note_splitter, 1)
+        layout.addWidget(self.note_table, 1)
         return page
 
     def setup_context_menus(self):
@@ -1032,13 +1015,11 @@ class MainWindow(QMainWindow):
     def password_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
         username_value = str(item.get("username", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, username_value, updated_value)
+        return (title_value, username_value)
 
     def note_sort_key(self, item: Dict[str, Any]):
         title_value = str(item.get("title", "")).casefold()
-        updated_value = str(item.get("updated_at", ""))
-        return (title_value, updated_value)
+        return title_value
 
     def apply_filter(self):
         keyword = self.search_edit.text().strip().lower()
@@ -1056,16 +1037,14 @@ class MainWindow(QMainWindow):
 
     def hide_details(self):
         self.password_detail.hide()
-        self.note_detail.hide()
         self.password_splitter.setSizes([1240, 0])
-        self.note_splitter.setSizes([1240, 0])
 
     def refresh_password_table(self):
         self.password_table.setRowCount(0)
         for item in self.password_items_view:
             row = self.password_table.rowCount()
             self.password_table.insertRow(row)
-            values = [item.get("title", ""), item.get("username", ""), item.get("notes", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", ""), item.get("username", ""), item.get("notes", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1076,7 +1055,7 @@ class MainWindow(QMainWindow):
         for item in self.note_items_view:
             row = self.note_table.rowCount()
             self.note_table.insertRow(row)
-            values = [item.get("title", ""), readable_time(item.get("updated_at", ""))]
+            values = [item.get("title", "")]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setData(Qt.ItemDataRole.UserRole, item.get("id"))
@@ -1100,13 +1079,6 @@ class MainWindow(QMainWindow):
             self.password_detail.show_password_item(item)
             self.password_detail.show()
             self.password_splitter.setSizes([820, 390])
-
-    def show_clicked_note_detail(self, *_args):
-        item = self.selected_note()
-        if item:
-            self.note_detail.show_note_item(item)
-            self.note_detail.show()
-            self.note_splitter.setSizes([820, 390])
 
     def require_password_selection(self) -> Optional[Dict[str, Any]]:
         item = self.selected_password()
@@ -1164,19 +1136,23 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(30_000, clear_clipboard)
 
     def add_note(self):
-        item = NoteDialog(parent=self).get_item()
-        if item:
-            self.vault.upsert_item(item)
-            self.refresh_all()
+        NoteDialog(parent=self, on_save=self.save_note).exec()
+
+    def save_note(self, item: Dict[str, Any]) -> None:
+        self.vault.upsert_item(item)
+        self.refresh_all()
+        if not any(note.get("id") == item["id"] for note in self.note_items_view):
+            self.search_edit.clear()
+        for row, note in enumerate(self.note_items_view):
+            if note.get("id") == item["id"]:
+                self.note_table.selectRow(row)
+                break
 
     def edit_note(self, *_args):
         item = self.require_note_selection()
         if not item:
             return
-        updated = NoteDialog(item=item, parent=self).get_item()
-        if updated:
-            self.vault.upsert_item(updated)
-            self.refresh_all()
+        NoteDialog(item=item, parent=self, on_save=self.save_note).exec()
 
     def delete_note(self):
         item = self.require_note_selection()
